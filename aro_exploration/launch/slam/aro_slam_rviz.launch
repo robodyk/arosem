@@ -1,0 +1,3 @@
+<launch>
+    <node name="rviz_slam" pkg="rviz" type="rviz" args="-d $(dirname)/../../rviz/slam.rviz -f icp_map" />
+</launch>

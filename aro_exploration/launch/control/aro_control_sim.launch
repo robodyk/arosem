@@ -1,0 +1,17 @@
+<launch>
+    <arg name="world" default="stage_4"/>
+    <arg name="ground_truth" default="true"/>
+    <arg name="ground_truth_control" default="false"/>
+    <arg name="simulation" value="true" />
+    <arg name="run_control" default="true"/>
+
+    <include file="$(dirname)/../sim_robot.launch" pass_all_args="true" />
+
+    <group if="$(arg run_control)">
+      <include file="$(dirname)/aro_control.launch" pass_all_args="true" />
+    </group>
+
+    <group unless="$(arg ground_truth_control)">
+        <include file="$(dirname)/aro_control_dependencies.launch" pass_all_args="true" />
+    </group>
+</launch>

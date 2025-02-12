@@ -1,0 +1,11 @@
+<launch>
+    <arg name="simulation" value="false" />
+    <arg name="rviz" default="false" /> <!-- You should launch rviz separately on your computer using aro_control_rviz.launch -->
+    
+    <include file="$(dirname)/../real_robot.launch" pass_all_args="true" />
+    <group>
+        <remap from="cmd_vel" to="cmd_vel_mux/random_walker" />
+        <include file="$(dirname)/aro_control.launch" pass_all_args="true" />
+        <include file="$(dirname)/aro_control_dependencies.launch" pass_all_args="true" />
+    </group>
+</launch>

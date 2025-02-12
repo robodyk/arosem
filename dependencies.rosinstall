@@ -1,0 +1,8 @@
+- git:
+    local-name: nav_utils
+    uri: https://github.com/tpet/nav_utils.git
+    version: master
+- git:
+    local-name: voxel_map
+    uri: https://bitbucket.org/tpetricek/voxel_map.git
+    version: catkin-noetic

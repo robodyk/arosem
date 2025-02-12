@@ -1,0 +1,25 @@
+<launch>
+    <arg name="world" default="live"/>
+    <arg name="record_output" default="0"/>
+
+    <node name="$(anon rosbag_record_input)" pkg="rosbag" type="record"
+          args="--lz4
+                --chunksize=8192
+                -o /tmp/$(arg world)_input
+                /ground_truth_odom
+                /odom
+                /scan
+                /tf
+                /tf_static"/>
+
+    <node name="$(anon rosbag_record_output)" pkg="rosbag" type="record" if="$(arg record_output)"
+          args="-o /tmp/$(arg world)_output
+                /cloud/smooth
+                /icp_slam/markers
+                /map
+                /position_error
+                /rosout_agg
+                /rotation_error
+                /tf
+                /tf_static"/>
+</launch>

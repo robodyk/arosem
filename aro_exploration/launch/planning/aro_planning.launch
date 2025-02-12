@@ -1,0 +1,15 @@
+<launch>
+    <arg name="robot_radius" default="$(eval 0.3)"/>
+    <arg name="robot_diameter" default="$(eval 2 * robot_radius)"/>
+    
+    <arg name="map_frame" default="icp_map" />
+
+    <node name="planner" pkg="aro_exploration" type="planner.py">
+        <rosparam subst_value="true">
+            map_frame: $(arg map_frame)
+            robot_frame: base_footprint
+            robot_diameter: $(arg robot_diameter)
+            occupancy_threshold: 90
+        </rosparam>
+    </node>
+</launch>

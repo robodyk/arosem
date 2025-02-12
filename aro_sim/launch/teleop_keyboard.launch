@@ -1,0 +1,5 @@
+<launch>
+    <node name="teleop_keyboard" pkg="turtlebot3_teleop" type="turtlebot3_teleop_key" launch-prefix="xterm -e">
+        <param name="model" value="burger_rgbd"/>
+    </node>
+</launch>

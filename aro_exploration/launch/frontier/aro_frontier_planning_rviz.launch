@@ -1,0 +1,4 @@
+<launch>
+    <arg name="map_frame" default="icp_map" doc="{icp_map,fused_map}"/>
+    <node name="rviz_frontier_planning" pkg="rviz" type="rviz" args="-d $(dirname)/../../rviz/frontier_planning.rviz -f $(arg map_frame)" launch-prefix="bash -c 'sleep 1; $0 $@' "/>
+</launch>

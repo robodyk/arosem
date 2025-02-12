@@ -1,0 +1,50 @@
+<?xml version="1.0"?>
+<package format="3">
+  <name>aro_exploration</name>
+  <version>2024.0.0</version>
+  <description>ARO exploration sample code</description>
+
+  <maintainer email="peckama2@fel.cvut.cz">Martin Pecka</maintainer>
+  <maintainer email="nekovfra@fel.cvut.cz">Frantisek Nekovar</maintainer>
+  
+  <author>Martin Pecka</author>
+  <author>Frantisek Nekovar</author>
+  <author>Tomas Petricek</author>
+
+  <license>BSD</license>
+
+  <buildtool_depend>catkin</buildtool_depend>
+  <buildtool_depend>python3-setuptools</buildtool_depend>
+
+  <exec_depend>actionlib</exec_depend>
+  <exec_depend>apriltag_ros</exec_depend>
+  <exec_depend>aro_msgs</exec_depend>
+  <exec_depend>aro_sim</exec_depend>
+  <exec_depend>cras_laser_geometry</exec_depend>
+  <exec_depend>gazebo_msgs</exec_depend>
+  <exec_depend>gazebo_ros</exec_depend>
+  <exec_depend>geometry_msgs</exec_depend>
+  <exec_depend>image_proc</exec_depend>
+  <exec_depend>image_transport</exec_depend>
+  <exec_depend>kobuki_msgs</exec_depend>
+  <exec_depend>nav_msgs</exec_depend>
+  <exec_depend>nav_utils</exec_depend>
+  <exec_depend>nodelet</exec_depend>
+  <exec_depend>python3-scikit-sparse-pip</exec_depend>
+  <exec_depend>python3-scipy</exec_depend>
+  <exec_depend>python3-numpy</exec_depend>
+  <exec_depend>python3-matplotlib</exec_depend>
+  <exec_depend>ros_numpy</exec_depend>
+  <exec_depend>rosbag</exec_depend>
+  <exec_depend>rospy</exec_depend>
+  <exec_depend>rviz</exec_depend>
+  <exec_depend>sensor_msgs</exec_depend>
+  <exec_depend>teleop_twist_keyboard</exec_depend>
+  <exec_depend>tf</exec_depend>
+  <exec_depend>tf2_geometry_msgs</exec_depend>
+  <exec_depend>tf2_py</exec_depend>
+  <exec_depend>tf2_ros</exec_depend>
+  <exec_depend>topic_tools</exec_depend>
+  <exec_depend>visualization_msgs</exec_depend>
+  <exec_depend>voxel_map</exec_depend>
+</package>

@@ -1,0 +1,4 @@
+<launch>
+    <arg name="map_frame" default="icp_map"/>
+    <node name="rviz_control" pkg="rviz" type="rviz" args="-d $(dirname)/../../rviz/control.rviz -f $(arg map_frame)"/>
+</launch>

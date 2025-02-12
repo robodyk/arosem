@@ -1,0 +1,45 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<!--
+    Launch simulation with a Turtlebot, one absolute marker and one relative marker.
+    Refer to base_sim.launch for all parameters of the launched simulation.
+    
+    IMPORTANT: This file is not supposed to be changed by students.
+-->
+
+<launch>
+    <!-- Absolute marker ID and pose -->
+    <arg name="ma_id" doc="Apriltag 16h5 family ID of the absolute marker" />
+    <arg name="ma_x" doc="X coordinate of the absolute marker" />
+    <arg name="ma_y" doc="Y coordinate of the absolute marker" />
+    <arg name="ma_yaw" doc="Yaw of the absolute marker" />
+    
+    <!-- Relative marker ID and pose -->
+    <arg name="mr_id" doc="Apriltag 16h5 family ID of the relative marker" />
+    <arg name="mr_x" doc="X coordinate of the relative marker" />
+    <arg name="mr_y" doc="Y coordinate of the relative marker" />
+    <arg name="mr_yaw" doc="Yaw of the relative marker" />
+    <arg name="mr_use_gt" default="true" doc="If true, the ground-truth pose of the relative marker will be available as ROS parameter. If false, it will not be available (and that is the setting for automatic evaluation)." />
+
+    <!-- Include the basic simulation with a world and robot. -->
+    <include file="$(dirname)/base_sim.launch" pass_all_args="true" />
+    
+    <node name="spawn_ma" pkg="gazebo_ros" type="spawn_model"
+          args="-sdf -database Apriltag16_05_0000$(arg ma_id) -model ma -P 1.5657 -z 0.14 -x $(arg ma_x) -y $(arg ma_y) -Y $(arg ma_yaw)" />
+    <rosparam subst_value="true">
+        abs_marker_id: $(arg ma_id)
+        abs_marker_x: $(arg ma_x)
+        abs_marker_y: $(arg ma_y)
+        abs_marker_yaw: $(arg ma_yaw)
+    </rosparam>
+    
+    <node name="spawn_mr" pkg="gazebo_ros" type="spawn_model"
+          args="-sdf -database Apriltag16_05_0000$(arg mr_id) -model mr -P 1.5657 -z 0.14 -x $(arg mr_x) -y $(arg mr_y) -Y $(arg mr_yaw)" />
+    <rosparam subst_value="true">
+        rel_marker_id: $(arg mr_id)
+    </rosparam>
+    <rosparam subst_value="true" if="$(arg mr_use_gt)">
+        rel_marker_gt_x: $(arg mr_x)
+        rel_marker_gt_y: $(arg mr_y)
+        rel_marker_gt_yaw: $(arg mr_yaw)
+    </rosparam>
+</launch>

@@ -1,0 +1,24 @@
+<?xml version='1.0'?>
+<sdf version='1.6'>
+  <model name='Apriltag16_05_00004'>
+    <link name='main'>
+    <pose frame=''>0 0 0 0 0 0</pose>
+      <visual name='main_Visual'>
+        <geometry>
+          <box>
+            <!-- We want tag size 0.151, but the 1024 px texture has 256 px white border, so we set size to 0.151 * 4 / 3. -->
+            <size>0.20133333 0.20133333 0.01</size>
+          </box>
+        </geometry>
+           <material>
+          <script>
+            <uri>model://Apriltag16_05_00004/materials/scripts</uri>
+            <uri>model://Apriltag16_05_00004/materials/textures</uri>
+            <name>Apriltag16_05_00004</name>
+          </script>
+        </material>
+      </visual>
+     </link>
+    <static>1</static>
+  </model>
+</sdf>

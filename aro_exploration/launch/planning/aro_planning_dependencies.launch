@@ -1,0 +1,5 @@
+<launch>
+    <include file="$(dirname)/../slam/aro_slam.launch" pass_all_args="true">
+        <arg name="rviz" value="false" />
+    </include>
+</launch>

@@ -1,0 +1,38 @@
+<?xml version="1.0"?>
+<package format="3">
+  <name>aro_sim</name>
+  <version>2024.0.0</version>
+  <description>ARO simulator resources and launchers.</description>
+    
+  <maintainer email="peckama2@fel.cvut.cz">Martin Pecka</maintainer>
+    
+  <author>Tomas Petricek</author>
+  
+  <license>BSD</license>
+  
+  <buildtool_depend>catkin</buildtool_depend>
+  
+  <exec_depend>cras_joy_tools</exec_depend>
+  <exec_depend>cras_topic_tools</exec_depend>
+  <exec_depend>gazebo_ros</exec_depend>
+  <exec_depend>joy</exec_depend>
+  <exec_depend>nav_utils</exec_depend>
+  <exec_depend>robot_state_publisher</exec_depend>
+  <exec_depend>rviz</exec_depend>
+  <exec_depend>teleop_twist_joy</exec_depend>
+  <exec_depend>turtlebot3</exec_depend>
+  <exec_depend>turtlebot3_gazebo</exec_depend>
+  <exec_depend>turtlebot3_teleop</exec_depend>
+  <exec_depend>turtlebot3_simulations</exec_depend>
+  <exec_depend>xacro</exec_depend>
+  <exec_depend>xterm</exec_depend> <!-- For keyboard teleop window -->
+
+  <export>
+    <!-- gazebo_ros_paths_plugin automatically adds these to
+      GAZEBO_PLUGIN_PATH and GAZEBO_MODEL_PATH when you do this export inside
+      the package.xml file. You can than use URIs of type model://my_package/stuff. -->
+    <gazebo_ros gazebo_model_path="${prefix}/models"/>
+    <gazebo_ros gazebo_media_path="${prefix}"/>
+    <gazebo_ros plugin_path="${prefix}/../../devel/lib"/>
+  </export>
+</package>

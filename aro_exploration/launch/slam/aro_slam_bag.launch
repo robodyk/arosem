@@ -1,0 +1,19 @@
+<launch>
+    <arg name="bag"   default="$(dirname)/../../data/slam/stage_4_input_2022-01-27-11-10-08.bag"/>
+    <arg name="start" default="0.0"/>
+    <arg name="rate"  default="1.0"/>
+    <arg name="odom"  default="true"/>
+
+    <param name="use_sim_time" value="true"/>
+
+    <node name="rosbag_play" pkg="rosbag" type="play" required="true"
+          args="--clock -d 1.0 -s $(arg start) -r $(arg rate) $(arg bag)">
+        <remap from="/tf" to="/tf_old" unless="$(arg odom)" />
+    </node>
+    <node unless="$(arg odom)" name="tf_remap" pkg="topic_tools" type="transform"
+          args="/tf_old /tf tf2_msgs/TFMessage
+                'm if m.transforms[0].child_frame_id not in (&quot;base_footprint&quot;, &quot;base_link&quot;, &quot;odom&quot;, &quot;world/base_footprint&quot;) else None'">
+    </node>
+
+    <include file="$(dirname)/aro_slam.launch" pass_all_args="true"/>
+</launch>

@@ -1,0 +1,14 @@
+<launch>
+    <arg name="world" default="stage_4"/>
+    <arg name="ground_truth" default="true"/>
+    <arg name="marker_config" default="1" />
+    <arg name="simulation" value="true" />
+    <arg name="rviz" default="true" />
+    <arg name="gui" default="false" />
+
+    <include file="$(dirname)/../sim_robot.launch" pass_all_args="true">
+        <arg name="fixed_frame" value="fused_map" />
+    </include>
+    <include file="$(dirname)/aro_exploration.launch" pass_all_args="true"/>
+    <include file="$(dirname)/aro_exploration_dependencies.launch" pass_all_args="true"/>
+</launch>

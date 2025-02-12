@@ -1,0 +1,30 @@
+<launch>
+    <arg name="scan" default="scan"/>
+    <arg name="cloud" default="cloud"/>
+    <arg name="odom_frame" default="odom"/>
+
+    <node name="scan_to_point_cloud" pkg="nodelet" type="nodelet"
+          args="standalone cras_laser_geometry/scan_to_point_cloud">
+        <rosparam subst_value="true">
+            fixed_frame: '$(arg odom_frame)'
+            wait_for_transform: 1.0
+            channel_options:  0x13  # intensities + viewpoint + index
+        </rosparam>
+        <remap from="scan" to="$(arg scan)"/>
+        <remap from="cloud" to="$(arg cloud)"/>
+    </node>
+    
+    <node name="cloud_filter" pkg="aro_exploration" type="cloud_filter" output="log">
+        <rosparam subst_value="true">
+            max_age:    0.5
+            grid_res:   0.1
+            k:          5
+            normal_eigenvector: 1
+            max_roughness: .inf
+            project_to_plane: false
+        </rosparam>
+        <remap from="cloud" to="$(arg cloud)"/>
+        <remap from="grid_cloud" to="$(arg cloud)/grid"/>
+        <remap from="smooth_cloud" to="$(arg cloud)/smooth"/>
+    </node>
+</launch>

@@ -1,0 +1,20 @@
+<launch>
+
+    <arg name="node_start_delay" default="5.0" />
+    <arg name="bag_file" default="$(find aro_reactive_control)/data/scan_data_0.bag" />
+    <arg name="ref_solution_file" default="$(find aro_reactive_control)/data/ref_solution_0.txt" />
+    <arg name="save_results" default="false"/>
+    <arg name="results_file" default="$(find aro_reactive_control)/data/results.txt"/>
+    <arg name="run_evaluation" default="true"/>
+
+
+    <node name="reactive_controller" pkg="aro_reactive_control" type="reactive_controller.py" output="screen">
+        <param name="use_manual_control" value="true" />
+        <param name="hw01_eval" value="true" />
+    </node>
+    
+    <group if="$(arg run_evaluation)">
+        <include file="$(dirname)/evaluator_hw01.launch" pass_all_args="true"></include>
+    </group>
+
+</launch>

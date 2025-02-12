@@ -1,0 +1,19 @@
+<launch>
+    <arg name="reactive_control" default="false" doc="Use your implementation of reactive_control to drive the robot" />
+    <arg name="keyboard_teleop" default="false" doc="Set to true to enable control of the robot via keyboard" />
+
+    <!-- Sanity check that the reactive_control and keyboard_teleop are not both true -->
+    <arg name="teleop_check" value="check" />
+    <arg name="teleop_check" value="fail" if="$(eval reactive_control and keyboard_teleop)"
+         doc="reactive_control and keyboard_teleop cannot both be true" />
+
+    <group if="$(arg reactive_control)">
+        <node name="reactive_controller" pkg="aro_reactive_control" type="reactive_controller.py" output="screen">
+            <param name="time_active_limit" value="10000.0" />
+        </node>
+        <node name="reactive_controller_evaluator" pkg="aro_reactive_control" type="reactive_control_evaluator.py" output="screen">
+            <param name="use_manual_control" value="false" />
+            <param name="evaluate_mission" value="false" />
+        </node>
+    </group>
+</launch>

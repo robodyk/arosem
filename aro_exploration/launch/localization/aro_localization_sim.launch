@@ -1,0 +1,14 @@
+<launch>
+    <arg name="world" default="stage_4"/>
+    <arg name="ground_truth" default="true"/>
+    <arg name="simulation" value="true" />
+    <arg name="localization_visualize" default="true" doc="Show factorgraph internal animation" />
+    <arg name="debug_localization" default="true" doc="Show debugging prints in console" />
+
+    <include file="$(dirname)/../sim_robot.launch" pass_all_args="true">
+        <arg name="fixed_frame" value="fused_map" />
+    </include>
+    <include file="$(dirname)/../reactive_control.launch" pass_all_args="true" />
+    <include file="$(dirname)/aro_localization.launch" pass_all_args="true" />
+    <include file="$(dirname)/aro_localization_dependencies.launch" pass_all_args="true" />
+</launch>

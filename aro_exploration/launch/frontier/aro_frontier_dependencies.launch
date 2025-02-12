@@ -1,0 +1,11 @@
+<launch>
+    <arg name="map_frame" default="icp_map" doc="{icp_map,fused_map}"/>
+    
+    <include file="$(dirname)/../slam/aro_slam.launch" pass_all_args="true">
+        <arg name="rviz" value="false" />
+    </include>
+    <include file="$(dirname)/../slam/aro_localization.launch" pass_all_args="true" if="$(eval map_frame == 'fused_map')">
+        <arg name="rviz" value="false" />
+    </include>
+    <include file="$(dirname)/../planning/aro_planning.launch" pass_all_args="true" />
+</launch>

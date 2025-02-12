@@ -1,0 +1,23 @@
+<launch>
+    <arg name="map_frame" default="icp_map" doc="{icp_map,fused_map}"/>
+    <arg name="map_frame_fast" default="$(arg map_frame)" />
+
+    <include file="$(dirname)/../slam/aro_slam.launch" pass_all_args="true">
+        <arg name="rviz" value="false" />
+        <arg name="fixed_frame" value="fused_map" />
+    </include>
+
+    <include file="$(dirname)/../localization/aro_localization.launch" pass_all_args="true">
+        <arg name="rviz" value="false"/>
+    </include>
+
+    <include file="$(dirname)/../frontier/aro_frontier.launch" pass_all_args="true" />
+
+    <include file="$(dirname)/../planning/aro_planning.launch" pass_all_args="true" />
+
+    <include file="$(dirname)/../control/aro_control.launch" pass_all_args="true">
+        <arg name="rviz" value="false" />
+        <arg name="map_frame" value="$(arg map_frame_fast)" />
+    </include>
+    
+</launch>

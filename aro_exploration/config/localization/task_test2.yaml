@@ -1,0 +1,11 @@
+# 2023-01-31-11-42-17.bag
+abs_marker_id: 7
+rel_marker_id: 4
+
+abs_marker_x: 1.44
+abs_marker_y: -0.05
+abs_marker_yaw: 0.0186
+
+rel_marker_gt_x: -2.09
+rel_marker_gt_y: 0
+rel_marker_gt_yaw: -2.91

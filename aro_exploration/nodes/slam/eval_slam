@@ -1,0 +1,59 @@
+#!/bin/bash
+
+set -e
+
+running=1
+
+signal_children() {
+    running=0
+    signal=$1
+    trap : ${signal}
+    # trap -p
+    echo "Sending ${signal} to child processes..."
+    kill -${signal} -- -$$
+}
+
+wait_children() {
+    echo "Waiting for child processes..."
+    wait
+    echo "Child processes finished."
+}
+
+# https://stackoverflow.com/questions/360201/how-do-i-kill-background-processes-jobs-when-my-shell-script-exits
+trap "signal_children SIGINT" ERR INT
+trap "signal_children SIGTERM" TERM
+trap wait_children EXIT
+
+pkg_dir=$(rospack find aro_exploration)
+bags=$(dir "${pkg_dir}"/data/slam/*.bag)
+out_dir="${pkg_dir}/data/slam/results"
+mkdir -p "${out_dir}"
+summary="${out_dir}/summary.csv"
+echo "Writing summary into ${summary}..."
+echo "odom alignment loss error" >> "${summary}"
+
+for odom in false true; do
+    for alignment in frame_to_frame frame_to_map; do
+					for loss in point_to_point point_to_plane; do
+
+							desc="odom_${odom}_alignment_${alignment}_loss_${loss}"
+							echo "Config: odom ${odom}, alignment ${alignment}, loss ${loss}"
+							csv="${out_dir}/${desc}.csv"
+							echo "Results: $(realpath --relative-to="${pkg_dir}" "${csv}")"
+							for bag in ${bags}; do
+									if [ ${running} = 0 ]; then
+											exit 0
+									fi
+
+									log="${out_dir}/$(basename ${bag})_odom_${odom}_alignment_${alignment}_loss_${loss}.log"
+									echo "Evaluating $(basename ${bag})..."
+									roslaunch aro_exploration aro_slam_bag.launch rate:=3 rviz:=false bag:="${bag}" odom:=${odom} alignment:=${alignment} loss:=${loss} csv:="${csv}" >> "${log}" 2>&1
+							done
+
+							# Compute and store average error.
+							avg=$(python -c "f = open('${csv}'); x = [float(s) for s in f.read().split()]; print(sum(x) / len(x))" || echo NaN)
+							echo "${odom} ${alignment} ${loss} ${avg}" >> "${summary}"
+							echo
+					done
+    done
+done

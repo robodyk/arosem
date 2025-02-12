@@ -1,0 +1,3 @@
+<launch>
+    <node name="rviz_localization" pkg="rviz" type="rviz" args="-d $(dirname)/../../rviz/localization.rviz -f fused_map"/>
+</launch>

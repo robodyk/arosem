@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<!--
+    Launches the simulated robot and all its base drivers.
+    
+    IMPORTANT: Do not change this file!
+-->
+
+<launch>
+    <include file="$(find aro_sim)/launch/aro_sim.launch" pass_all_args="true">
+        <arg name="rviz" value="false"/>
+        <!-- <arg name="fixed_frame" value="world"/> -->
+        <!-- <arg name="odom_frame" value="ground_truth_odom"/> -->
+    </include>
+</launch>
+

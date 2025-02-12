@@ -1,0 +1,29 @@
+# SPDX-License-Identifier: BSD-3-Clause
+# SPDX-FileCopyrightText: Czech Technical University in Prague
+
+# Beda's long-range radio gamepad, rev 1 with larger FTR10 receiver
+# device_ids: ['2e8a:000a']  # commented out so that it doesn't collide with the new revision
+device_ids: []
+num_buttons: 32
+num_axes: 8
+buttons:
+  0: 'b[0]'  # A, green
+  1: 'b[1]'  # B, red
+  2: 'b[2]'  # X, blue
+  3: 'b[3]'  # Y, yellow
+  4: 'b[4]'  # LB (top left on back side)
+  5: 'b[5]'  # RB (top right on back side)
+  6: '0'  # Back, 9 (left small)
+  7: '0'  # Start, 10 (right small)
+  8: '0'  # XBox button, 10 (top left in the center)
+  9: 'b[10]'  # Left joy press
+  10: 'b[11]'  # Right joy press
+axes:
+  0: 'a[0]'  # Left joy left-right (left = 1, right = -1)
+  1: 'a[1]'  # Left joy top-down (top = 1, down = -1)
+  2: '1+2*a[4]'  # Axis for LT (fully released = 1, fully pressed = -1)
+  3: 'a[2]'  # Right joy left-right (left = 1, right = -1)
+  4: 'a[3]'  # Right joy top-down (top = 1, down = -1)
+  5: '1+2*a[5]'  # Axis for RT (fully released = 1, fully pressed = -1)
+  6: 'b[8] - b[9]'  # D-Pad/hat/arrows left-right (left = 1, right = -1)
+  7: 'b[6] - b[7]'  # D-Pad/hat/arrows top-down (top = 1, down = -1)

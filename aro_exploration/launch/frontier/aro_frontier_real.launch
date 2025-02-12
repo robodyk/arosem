@@ -1,0 +1,9 @@
+<launch>
+    <arg name="simulation" value="false" />
+    <include file="$(dirname)/../real_robot.launch" pass_all_args="true" />
+    <group>
+        <remap from="cmd_vel" to="cmd_vel_mux/random_walker" />
+        <include file="$(dirname)/aro_frontier.launch" pass_all_args="true"/>
+        <include file="$(dirname)/aro_frontier_dependencies.launch" pass_all_args="true" />
+    </group>
+</launch>

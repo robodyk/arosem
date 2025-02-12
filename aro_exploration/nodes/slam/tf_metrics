@@ -1,0 +1,133 @@
+#!/usr/bin/env python
+"""Computes TF metrics such as L2 distances between pairs of frames, e.g., to assess SLAM accuracy w.r.t. ground
+truth."""
+from typing import List, Tuple, Dict
+
+import numpy as np
+
+import rospy
+import tf2_ros
+from ros_numpy import numpify
+from std_msgs.msg import Float32
+
+from aro_slam.utils import slots, array
+
+
+class Average:
+    def __init__(self):
+        self.sum = 0.0
+        self.weight = 0
+
+    def update(self, other, weight=1):
+        self.sum += weight * other
+        self.weight += weight  # Can change type! 8)
+        return self
+
+    def reset(self):
+        self.sum = 0.0
+        self.weight = 0
+
+    def __iadd__(self, other):
+        return self.update(other)
+
+    def __call__(self):
+        return self.sum / self.weight
+
+    def __str__(self):
+        return '%f' % self()
+
+
+def inv(T: np.ndarray) -> np.ndarray:
+    assert T.shape[0] == T.shape[1]
+    T_inv = np.eye(T.shape[0])
+    T_inv[:-1, :-1] = T[:-1, :-1].T
+    T_inv[:-1, -1:] = -np.matmul(T_inv[:-1, :-1], T[:-1, -1:])
+    return T_inv
+
+
+def diff(T_0: np.ndarray, T_1: np.ndarray) -> np.ndarray:
+    T_diff = np.matmul(inv(T_0), T_1)
+    return T_diff
+
+
+class TfMetrics:
+    def __init__(self):
+        default_transforms = [
+            ['world', 'world/base_footprint'],
+            ['map', 'base_footprint']
+        ]
+        self.transforms: List[List[str]] = rospy.get_param('~transforms', default_transforms)
+
+        self.transforms: List[Tuple[str, str]] = [tuple(tf_key) for tf_key in self.transforms]
+
+        if len(self.transforms) < 2:
+            rospy.logwarn('Less than 2 transforms specified.')
+            return
+
+        self.interval = rospy.Duration(rospy.get_param('~interval', 1.))
+        self.timeout = rospy.Duration(rospy.get_param('~timeout', 1.))
+        self.csv_path: str = rospy.get_param('~csv', '')
+
+        self.Ts: Dict[Tuple[str, str], List[np.ndarray]] = {}
+        for tf_key in self.transforms:
+            parent, child = tf_key
+            self.Ts[tf_key] = []
+            rospy.loginfo('Monitoring %s-to-%s transform every %g s.', child, parent, self.interval.to_sec())
+        self.avg = Average()
+
+        if self.csv_path:
+            self.csv = open(self.csv_path, mode='a', buffering=1)
+
+        self.pos_error_pub = rospy.Publisher('position_error', Float32, queue_size=5, latch=True)
+        self.avg_pos_error_pub = rospy.Publisher('average_position_error', Float32, queue_size=5, latch=True)
+        self.rot_error_pub = rospy.Publisher('rotation_error', Float32, queue_size=5, latch=True)
+        self.avg_rot_error_pub = rospy.Publisher('average_rotation_error', Float32, queue_size=5, latch=True)
+
+        self.tf = tf2_ros.Buffer()
+        self.tf_sub = tf2_ros.TransformListener(self.tf)
+        self.timer = rospy.Timer(self.interval, self.timer_cb)
+
+    def metrics(self, stamp):
+        Ts = {}
+
+        for tf_key in self.transforms:
+            parent, child = tf_key
+            try:
+                tf = self.tf.lookup_transform(parent, child, stamp, self.timeout)
+                T = numpify(tf.transform)
+                Ts[tf_key] = T
+            except tf2_ros.TransformException as ex:
+                rospy.logwarn('Could not find %s-to-%s transform: %s.', child, parent, ex)
+
+        missing = set(self.transforms) - set(Ts)
+        if missing:
+            rospy.logwarn('Transforms not found: %s.', missing)
+            return
+
+        for tf_key, T in Ts.items():
+            self.Ts[tf_key].append(T)
+
+        diffs = [diff(self.Ts[tf_key][0], self.Ts[tf_key][-1]) for tf_key in self.transforms]
+        error = diff(diffs[0], diffs[1])
+        # d = np.linalg.norm(diffs[0][:-1, -1:] - diffs[1][:-1, -1:])
+        d = np.linalg.norm(error[:-1, -1:])
+        self.avg += d
+        self.pos_error_pub.publish(d)
+        self.avg_pos_error_pub.publish(self.avg())
+        if self.csv_path:
+            self.csv.writelines(['%.6f\n' % d])
+            # self.csv.write('%.6f\n' % d)
+        rospy.loginfo('position error: %.3f m, average: %.3f m', d, self.avg())
+
+    def timer_cb(self, event):
+        self.metrics(event.current_expected)
+
+
+def main():
+    rospy.init_node('tf_metrics')
+    node = TfMetrics()
+    rospy.spin()
+
+
+if __name__ == '__main__':
+    main()

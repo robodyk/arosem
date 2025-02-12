@@ -1,0 +1,214 @@
+#!/usr/bin/env python
+"""
+Cloud filter node.
+"""
+from __future__ import absolute_import, division, print_function
+from aro_slam.clouds import Channels, DType
+from enum import Enum
+import numpy as np
+from numpy.lib.recfunctions import merge_arrays, rename_fields, structured_to_unstructured, unstructured_to_structured
+import rospy
+from ros_numpy import msgify, numpify
+from scipy.spatial import cKDTree
+from sensor_msgs.msg import PointCloud2
+from timeit import default_timer as timer
+
+
+def timing(f):
+    def timing_wrapper(*args, **kwargs):
+        t0 = timer()
+        try:
+            ret = f(*args, **kwargs)
+            return ret
+        finally:
+            t1 = timer()
+            rospy.loginfo('%s %.6f s' % (f.__name__, t1 - t0))
+    return timing_wrapper
+
+
+@timing
+def grid_filter(x, grid_res, keep='random'):
+    """Select a random point within each cell. Order is not preserved."""
+    assert isinstance(x, np.ndarray)
+    assert isinstance(grid_res, float)
+    assert keep in ('first', 'random', 'last')
+    # Convert points in cols to rows, and shuffle the rows.
+    if keep == 'first':
+        # Make the first item last.
+        pass
+    elif keep == 'random':
+        # Make the first item random.
+        x = x.copy()
+        np.random.shuffle(x)
+    elif keep == 'last':
+        # Keep the last item last.
+        x = x[::-1]
+    # Convert to grid indices.
+    idx = structured_to_unstructured(x[Channels.position.value])
+    idx = np.floor(idx / grid_res)
+    # Keep first point in the grid cell.
+    _, keep = np.unique(idx, return_index=True, axis=0)
+    x = x[keep]
+    return x
+
+
+@timing
+def covs(x, obs_axis=-2, var_axis=-1, center=True):
+    """Create covariance matrices from multiple samples."""
+    assert isinstance(x, np.ndarray)
+    n = x.shape[obs_axis]
+    if center:
+        xm = x.mean(axis=obs_axis, keepdims=True)
+        xc = x - xm
+    else:
+        xc = x
+    if var_axis >= 0:
+        xx = np.expand_dims(xc, var_axis) * np.expand_dims(xc, var_axis + 1)
+    else:
+        xx = np.expand_dims(xc, var_axis) * np.expand_dims(xc, var_axis - 1)
+    xx = xx.sum(axis=obs_axis)
+    xx = xx / (n - 1)
+    return xx
+
+
+@timing
+def orient_normals(x, inward=False, inplace=False):
+    """Consistently orient normals w.r.t. viewpoints, inward or outward object.
+
+    Required channels: x, y, z, normal_{x,y,z}, vp_{x,y,z}
+    """
+    if not inplace:
+        x = x.copy()
+    p = structured_to_unstructured(x[Channels.position.value])
+    normal = structured_to_unstructured(x[Channels.normal.value])
+    vp = structured_to_unstructured(x[Channels.viewpoint.value])
+    dot = ((p - vp) * normal).sum(axis=-1)
+    flip = dot < 0 if inward else dot > 0
+    normal[flip] = -normal[flip]
+    normal_struct = unstructured_to_structured(normal, dtype=DType.normal.value)
+    for v in Channels.normal.value:
+        x[v] = normal_struct[v]
+    return x
+
+
+@timing
+def estimate_normals(x_struct, k=None, r=None, normal_eigenvector=0, inward=False):
+    assert isinstance(x_struct, np.ndarray)
+    assert isinstance(k, int) and k >= 2
+
+    # Find nearest neighbors.
+    x = structured_to_unstructured(x_struct[Channels.position.value])
+    index = cKDTree(x)
+    if k is not None:
+        if r is not None:
+            d, i = index.query(x, k=k, distance_upper_bound=r)
+        else:
+            d, i = index.query(x, k=k)
+    elif r is not None:
+        i = index.query_ball_point(x, 0.15)
+    x_nn = x[i]
+
+    mean = x_nn.mean(axis=1)
+    mean_struct = unstructured_to_structured(mean, dtype=DType.mean.value)
+    x_cov = covs(x_nn - mean[:, None], obs_axis=1, var_axis=2, center=False)
+    # Eigenvalues in ascending order.
+    eigval, eigvec = np.linalg.eigh(x_cov)
+    normal = eigvec[..., normal_eigenvector]
+    normal_struct = unstructured_to_structured(normal, dtype=DType.normal.value)
+    roughness = np.sqrt(eigval[..., normal_eigenvector:normal_eigenvector + 1])
+    roughness_struct = unstructured_to_structured(roughness, dtype=DType.roughness.value)
+    # This is not curvature but it makes RViz normal display happy.
+    curvature_struct = unstructured_to_structured(roughness, dtype=DType.curvature.value)
+    x_struct = merge_arrays((x_struct, mean_struct, normal_struct, roughness_struct, curvature_struct),
+                            flatten=True)
+    x_struct = orient_normals(x_struct, inward=inward, inplace=True)
+
+    return x_struct
+
+
+@timing
+def project_to_plane(cloud_struct):
+    """Project points to estimated planes."""
+    assert isinstance(cloud_struct, np.ndarray)
+    x = structured_to_unstructured(cloud_struct[Channels.position.value])
+    mean = structured_to_unstructured(cloud_struct[Channels.mean.value])
+    normal = structured_to_unstructured(cloud_struct[Channels.normal.value])
+    v = structured_to_unstructured(cloud_struct[Channels.viewpoint.value])
+    d = -(normal * mean).sum(axis=1, keepdims=True)
+    r = (x - v)
+    k = ((normal * v).sum(axis=1, keepdims=True) - d) / (normal * r).sum(axis=1, keepdims=True)
+    proj = v + k * r
+    # proj_struct = unstructured_to_structured(proj, dtype=np.dtype([(f, 'f4') for f in Channels.projection.value]))
+    proj_struct = unstructured_to_structured(proj, dtype=DType.projection.value)
+    cloud_struct = merge_arrays((cloud_struct, proj_struct), flatten=True)
+    return cloud_struct
+
+
+class CloudFilter(object):
+
+    def __init__(self):
+        # Throw messages older than a threshold [s].
+        self.max_age = rospy.get_param('~max_age', 0.25)
+        # Grid resolution / cell size [m].
+        self.grid_res = rospy.get_param('~grid_res', 0.1)
+        # Neighborhood size, K nearest neighbors.
+        self.k = rospy.get_param('~k', 5)
+        # Eigenvector to be used for normal, in ascending order of
+        # corresponding eigenvalues 0, 1, 2. Use 0 for 3-D and 1 for 2-D data.
+        self.normal_eigenvector = rospy.get_param('~normal_eigenvector', 0)
+        self.max_roughness = rospy.get_param('~max_roughness', float('inf'))
+        self.project_to_plane = rospy.get_param('~project_to_plane', False)
+
+        self.grid_cloud_pub = rospy.Publisher('grid_cloud', PointCloud2, queue_size=5)
+
+        self.smooth_cloud_pub = rospy.Publisher('smooth_cloud', PointCloud2, queue_size=5)
+        self.points_sub = rospy.Subscriber('cloud', PointCloud2, self.process_cloud, queue_size=5)
+
+    def process_cloud(self, msg):
+        assert isinstance(msg, PointCloud2)
+
+        stamp = msg.header.stamp
+        age = (rospy.Time.now() - stamp).to_sec()
+        if age > self.max_age:
+            rospy.logwarn_throttle(5.0, 'Skipping message %.2f s old (older than %.2f s).'
+                                   % (age, self.max_age))
+            return
+
+        if msg.width * msg.height == 0:
+            rospy.logwarn_throttle(5.0, 'An empty point cloud received.')
+            return
+
+        x = numpify(msg)
+
+        if self.grid_res > 0.0:
+            x = grid_filter(x, self.grid_res)
+            filtered = msgify(PointCloud2, x)
+            assert isinstance(filtered, PointCloud2)
+            filtered.header = msg.header
+            self.grid_cloud_pub.publish(filtered)
+
+        x = estimate_normals(x, k=self.k, normal_eigenvector=self.normal_eigenvector)
+
+        if self.max_roughness < float('inf'):
+            keep = structured_to_unstructured(x[Channels.roughness.value])[:, 0] <= self.max_roughness
+            print(keep.shape, x.shape)
+            x = x[keep]
+
+        if self.project_to_plane:
+            x = project_to_plane(x)
+            x[Channels.position.value] = x[Channels.projection.value]
+
+        filtered = msgify(PointCloud2, x)
+        assert isinstance(filtered, PointCloud2)
+        filtered.header = msg.header
+        self.smooth_cloud_pub.publish(filtered)
+
+
+def main():
+    rospy.init_node('cloud_filter', log_level=rospy.INFO)
+    node = CloudFilter()
+    rospy.spin()
+
+
+if __name__ == '__main__':
+    main()

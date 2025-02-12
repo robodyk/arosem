@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<!--
+    Launches the real robot and all its base drivers.
+    
+    IMPORTANT: Do not change this file!
+-->
+
+<launch>
+    <arg name="run_driver" default="true" doc="Set to false if you want to run your processing code separate from the driver." />
+    
+    <group if="$(arg run_driver)">
+        <include file="$(find robolab_bringup)/launch/turtlebot2.launch" pass_all_args="true">
+        </include>
+        <param name="cmd_vel_mux/yaml_cfg_file" value="$(dirname)/../config/cmd_vel_mux.yaml" /> 
+        <node name="base_footprint_publisher" pkg="tf2_ros" type="static_transform_publisher" args="0 0 0 0 0 0 base_link base_footprint" respawn="true" />
+    </group>
+</launch>
+

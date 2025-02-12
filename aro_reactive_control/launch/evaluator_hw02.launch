@@ -1,0 +1,11 @@
+<launch>
+    <arg name="save_results" default="false"/>
+    <arg name="results_file" default="$(find aro_reactive_control)/data/results.txt"/>
+
+    <node name="reactive_controller_evaluator" pkg="aro_reactive_control" type="reactive_control_evaluator.py" output="screen">
+        <param name="use_manual_control" value="false" />
+        <param name="evaluate_mission" value="true" />
+        <param name="save_results" value="$(arg save_results)" />
+        <param name="results_file" value="$(arg results_file)" />
+    </node>
+</launch>

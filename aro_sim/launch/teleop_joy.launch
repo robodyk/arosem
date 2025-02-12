@@ -1,0 +1,33 @@
+<launch>
+    <arg name="joy_dev" default="/dev/input/js0" />
+    <arg name="joy_remapper" default="true" doc="Set to false if your gamepad is not recognized." />
+  
+    <param name="joy_translator/config_base_path" value="$(dirname)/../config/joy_mappings" />
+    <include file="$(find cras_joy_tools)/launch/joy_translator.launch" pass_all_args="true" if="$(arg joy_remapper)">
+        <arg name="dev" value="$(arg joy_dev)" />
+        <arg name="autorepeat_rate" value="20" />
+        <arg name="translator_node_name" value="joy_translator" />
+    </include>
+    <node pkg="joy" type="joy_node" name="$(anon joy_node)" respawn="true" unless="$(arg joy_remapper)">
+        <param name="dev" value="$(arg joy_dev)" />
+        <param name="autorepeat_rate" value="20" />
+        <param name="deadzone" type="double" value="0.1" />  <!-- Deadzone is handled by translator. -->
+        <param name="coalesce_interval" type="double" value="0.033" />
+        <param name="default_trig_val" type="bool" value="true" />  <!-- Read trigger values instead of publishing wrongly zeros. -->
+    </node>
+
+    <node pkg="teleop_twist_joy" name="teleop_twist_joy" type="teleop_node">
+        <remap from="joy" to="joy_translated" />
+        <rosparam>
+            axis_linear: 1  # Left control forward-back axis
+            scale_linear: 0.25
+            scale_linear_turbo: 0.5
+
+            axis_angular: 0  # Left control left-right axis
+            scale_angular: 1.0
+
+            enable_button: 0  # A, green, btn 3 on C-Tech
+            enable_turbo_button: 1  # X, blue, btn 4 on C-Tech
+        </rosparam>
+    </node>
+</launch>

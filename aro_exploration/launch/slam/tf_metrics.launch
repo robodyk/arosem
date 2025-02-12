@@ -1,0 +1,24 @@
+<launch>
+    <arg name="csv" default="/tmp/tf_metrics.csv"/>
+    <arg name="map_frame" default="icp_map"/>
+
+    <node name="ground_truth_odom_to_tf" pkg="nav_utils" type="odom_to_tf" output="log">
+        <rosparam>
+            parent_frame: world
+            child_frame: world/base_footprint
+        </rosparam>
+        <remap from="odom" to="ground_truth_odom"/>
+    </node>
+    <node name="tf_metrics" pkg="aro_exploration" type="tf_metrics" output="log">
+        <rosparam subst_value="true">
+            transforms: [[world, world/base_footprint], [$(arg map_frame), base_footprint]]
+            interval: 1.0
+            timeout: 1.0
+            csv: '$(arg csv)'
+        </rosparam>
+        <remap from="position_error" to="position_error"/>
+        <remap from="average_position_error" to="average_position_error"/>
+        <remap from="rotation_error" to="rotation_error"/>
+        <remap from="average_rotation_error" to="average_rotation_error"/>
+    </node>
+</launch>

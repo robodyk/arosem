@@ -1,0 +1,13 @@
+<launch>
+    <arg name="simulation" value="false" />
+    <arg name="rviz" default="false" /> <!-- You should launch rviz separately on your computer using aro_slam_rviz.launch -->
+
+    <arg name="debug_slam" default="true" doc="Show debugging prints in console" />
+    
+    <include file="$(dirname)/../real_robot.launch" pass_all_args="true" />
+    <group>
+        <remap from="cmd_vel" to="cmd_vel_mux/random_walker" />
+        <include file="$(dirname)/../reactive_control.launch" pass_all_args="true" />
+        <include file="$(dirname)/aro_slam.launch" pass_all_args="true"/>
+    </group>
+</launch>

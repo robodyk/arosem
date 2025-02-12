@@ -1,0 +1,23 @@
+<launch>
+    <arg name="robot_radius" default="$(eval 0.6)"/>
+    <arg name="robot_diameter" default="$(eval 2 * robot_radius)"/>
+    <node name="planner" pkg="aro_exploration" type="planner.py" output="screen">
+        <rosparam subst_value="true">
+            map_frame: map
+            robot_frame: base_footprint
+            robot_diameter: $(arg robot_diameter)
+            occupancy_threshold: 25
+        </rosparam>
+        <remap from="occupancy" to="occupancy"/>
+      </node>
+
+    <node name="tester" pkg="aro_exploration" type="tester.py" output="screen">
+        <rosparam subst_value="true">
+            map_frame: map
+            robot_frame: base_footprint
+            robot_diameter: $(arg robot_diameter)
+            occupancy_threshold: 25
+        </rosparam>
+        <remap from="occupancy" to="occupancy"/>
+    </node>
+</launch>

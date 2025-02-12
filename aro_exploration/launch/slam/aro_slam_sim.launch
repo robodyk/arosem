@@ -1,0 +1,10 @@
+<launch>
+    <arg name="world" default="stage_4"/>
+    <arg name="ground_truth" default="true"/>
+    <arg name="simulation" value="true" />
+    <arg name="debug_slam" default="true" doc="Show debugging prints in console" />
+
+    <include file="$(dirname)/../sim_robot.launch" pass_all_args="true" />
+    <include file="$(dirname)/../reactive_control.launch" pass_all_args="true" />
+    <include file="$(dirname)/aro_slam.launch" pass_all_args="true" />
+</launch>

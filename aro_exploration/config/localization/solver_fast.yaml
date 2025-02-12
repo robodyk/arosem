@@ -1,0 +1,21 @@
+opt_loss: 'linear'
+opt_f_scale: 1  # does nothing for linear loss
+
+#opt_loss: 'soft_l1'
+#opt_f_scale: 0.5
+
+#opt_loss: 'huber'
+#opt_f_scale: 1
+
+#opt_loss: 'cauchy'
+#opt_f_scale: 1.9
+
+opt_max_nfev: 5
+opt_x_scale: 1  # or 'jac'
+opt_verbose: 1
+opt_ftol: 5e-2
+opt_gtol: 1e-4
+opt_xtol: 5e-2
+opt_tr_maxiter: 10
+opt_tr_atol: 1e-2
+opt_tr_btol: 1e-2

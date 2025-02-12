@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<!--
+    Teleoperate the real robot using keyboard.
+    
+    Run this launch file on your computer and set ROS_MASTER_URI=http://turtleXX:11311 , changing XX to your robot number.
+-->
+
+<launch>
+    <node name="teleop_keyboard" pkg="teleop_twist_keyboard" type="teleop_twist_keyboard.py" launch-prefix="xterm -e">
+        <remap from="cmd_vel" to="cmd_vel_mux/teleop_cmd_vel" />
+        <param name="repeat_rate" value="10.0" />
+        <param name="key_timeout" value="1.0" />
+        <param name="speed" value="0.25" />
+        <param name="turn" value="0.5" />
+    </node>
+</launch>
+

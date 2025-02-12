@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<!--
+    This launch file is a wrapper that just selects one of the available marker placement configs from folder
+    config/marker_configs and includes sim_with_markers.launch, which is the main launch file for the ARO simulation.
+    Refer to base_sim.launch for all parameters of the launched simulation.
+
+    IMPORTANT: This file is not supposed to be changed by students.
+-->
+<launch>
+    <arg name="world" default="aro_eval_2"/>
+    <arg name="marker_config" default="1" doc="1-4, gives positions of the markers in the loaded world." />
+    <arg name="ma_id" default="7" doc="Apriltag 16h5 family ID of the absolute marker" />
+    <arg name="mr_id" default="4" doc="Apriltag 16h5 family ID of the relative marker" />
+    
+    <!-- Sanity check that the sim launch file is not run on real turtlebots. -->
+    <arg name="hostname_check" value="$(optenv HOSTNAME '')" />
+    <arg name="hostname_check" value="fail" if="$(eval arg('hostname_check').startswith('turtle'))"
+         doc="Do not allow running aro_sim on real turtlebots" />
+
+    <include file="$(dirname)/../config/marker_poses/$(arg world)/$(arg marker_config).launch" pass_all_args="true" />
+</launch>

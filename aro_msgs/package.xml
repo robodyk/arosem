@@ -1,0 +1,22 @@
+<?xml version="1.0"?>
+<package format="3">
+  <name>aro_msgs</name>
+  <version>2024.0.0</version>
+  <description>ARO messages package</description>
+
+  <maintainer email="nekovfra@fel.cvut.cz">Frantisek Nekovar</maintainer>
+  
+  <author email="nekovfra@fel.cvut.cz">Frantisek Nekovar</author>
+
+  <license>BSD</license>
+
+  <buildtool_depend>catkin</buildtool_depend>
+  
+  <depend>actionlib_msgs</depend>
+  <depend>geometry_msgs</depend>
+  <depend>std_msgs</depend>
+  
+  <build_depend>message_generation</build_depend>
+  <build_export_depend>message_runtime</build_export_depend>
+  <exec_depend>message_runtime</exec_depend>
+</package>

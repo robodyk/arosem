@@ -1,0 +1,18 @@
+<launch>
+    <arg name="node_start_delay" default="5.0" />
+    <arg name="bag_file" default="$(find aro_reactive_control)/data/scan_data_0.bag" />
+    <arg name="ref_solution_file" default="$(find aro_reactive_control)/data/ref_solution_0.txt" />
+    <arg name="save_results" default="false"/>
+    <arg name="results_file" default="$(find aro_reactive_control)/data/results.txt"/>
+    
+    <param name="use_sim_time" value="false" />
+
+    <node name="scan_processing_evaluator" pkg="aro_reactive_control" type="scan_processing_evaluator.py" output="screen" required="true">
+        <param name="ref_solution_file" value="$(arg ref_solution_file)" />
+        <param name="save_results" value="$(arg save_results)" />
+        <param name="results_file" value="$(arg results_file)" />
+    </node>
+    
+    <node pkg="rosbag" type="play" name="player" output="screen" args="$(arg bag_file)" launch-prefix="bash -c 'sleep $(arg node_start_delay); $0 $@' "/>
+
+</launch>

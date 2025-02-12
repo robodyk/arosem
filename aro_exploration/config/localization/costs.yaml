@@ -1,0 +1,8 @@
+# Costs (multipliers of residuals) of the measurements added to factor graph (used when fuse_icp is false).
+
+c_odom_default: 1.0  # Cost for odometry measurements without valid covariance.
+c_odom_scale: 1.0  # Cost for odometry measurements with valid covariance (cost = scale / sqrt(covariance)).
+c_odom_bumper: 1e-6  # Cost for odometry measurements when bumper was active.
+c_mr_scale: 1.0  # Cost of the relative marker observation (cost ~= scale * (max_dist - dist) / (max_dist + 0.1)).
+c_ma_scale: 2.0  # Cost of the absolute marker observation (cost ~= scale * (max_dist - dist) / (max_dist + 0.1)).
+c_marker_yaw_scale: 1.0  # Extra multiplier for yaw in marker observations.

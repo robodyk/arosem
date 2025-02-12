@@ -1,0 +1,52 @@
+# Configuration of the least-squares solver.
+
+# See https://docs.scipy.org/doc/scipy/reference/generated/scipy.optimize.least_squares.html for details.
+
+# Several optimization methods have been implemented. All methods from scipy.optimize.least_squares (lm, trf, dogbox)
+# plus additional methods: cholmod, umfpack, pinv. The differences between them should be mostly in speed and the number
+# of iterations they need. The best for this task seems to be cholmod.
+# To use umfpack, you have to install it: `pip3 install --user scikit-umfpack`.
+opt_method: cholmod
+
+# Several options are available for (loss, f_scale) pair. Linear loss seems to work best in most cases.
+# opt_f_scale is a scale factor for the loss function, i.e. it defines how the "raw" loss is scaled before
+# being put into the robust loss. If this scale is too small, all measurements will be discarded by the robust loss
+# and localization would mostly stick to its initialization. If the scale is too large, the robust loss does basically
+# nothing.
+
+opt_loss: 'linear'
+opt_f_scale: 1  # does nothing for linear loss
+
+#opt_loss: 'soft_l1'
+#opt_f_scale: 1000
+
+#opt_loss: 'huber'
+#opt_f_scale: 300
+
+#opt_loss: 'cauchy'
+#opt_f_scale: 10000
+
+opt_max_nfev: 40  # Maximum number of function evaluations.
+opt_x_scale: 'jac'  # float or 'jac'
+opt_verbose: 1
+opt_ftol: 5.e-5  # Stopping condition for f(x) value change.
+opt_gtol: 1.e-8  # Stopping condition for gradient change.
+opt_xtol: 5.e-5  # Stopping condition for x change.
+
+opt_method_options:
+  trf:
+    tr_solver: 'lsmr'
+    maxiter: 5000  # Max. number of Trust-Region algorithm iterations.
+    atol: 1.e-4  # Tolerance of Trust-Region algorithm.
+    btol: 1.e-4  # Tolerance of Trust-Region algorithm.
+  dogbox:
+    tr_solver: 'lsmr'
+    maxiter: 5000  # Max. number of Trust-Region algorithm iterations.
+    atol: 1.e-4  # Tolerance of Trust-Region algorithm.
+    btol: 1.e-4  # Tolerance of Trust-Region algorithm.
+  cholmod:
+    # https://scikit-sparse.readthedocs.io/en/latest/cholmod.html#module-sksparse.cholmod
+    beta: 1.e-20  # This is scale of the unit matrix added to Jt*J diagonal to help with non-full-rank matrix decomposition.
+    use_AAt_decomposition: True  # True should be faster (it decomposes the Jt*J product without explicitly computing it).
+    ordering_method: 'default'  # Row ordering for the Cholesky decomposition. default, natural, best, amd, metis, nesdis, colamd.
+    solve_method: 'a'  # Which cholmod method should be used for solving the least squares equation. a, ldlt, l_dlt, l_lt. a should be the fastest.

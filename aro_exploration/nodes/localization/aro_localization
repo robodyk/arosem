@@ -1,0 +1,709 @@
+#!/usr/bin/env python
+
+import copy
+import glob
+import math
+import multiprocessing
+import os
+import sys
+import time
+import traceback
+from multiprocessing import Process
+from queue import Empty, Full
+from threading import Lock, Thread
+from typing import Optional, Tuple, Sequence
+
+import numpy as np
+import scipy.linalg
+from matplotlib import pyplot as plt
+
+import rospy
+import tf2_geometry_msgs  # do not remove, this allows calling tf.transform() on geometry_msgs types
+import tf2_ros
+from apriltag_ros.msg import AprilTagDetectionArray
+from gazebo_msgs.msg import ContactsState
+from geometry_msgs.msg import Transform, TransformStamped, PoseStamped, Quaternion, Pose
+from kobuki_msgs.msg import SensorState
+from nav_msgs.msg import Odometry, Path
+from ros_numpy import msgify, numpify
+from tf.transformations import euler_from_quaternion, quaternion_from_euler, quaternion_multiply
+from tf2_py import TransformException
+from visualization_msgs.msg import MarkerArray, Marker
+
+from aro_localization.factor_graph import FactorGraph, r2w
+from aro_localization.odom_integrator import OdomIntegrator
+from aro_localization.utils import normalize_angle_symmetric
+
+
+class FactorGraphLocalizationNode(object):
+    """Node for localization of a mobile robot in 2D using odometry, markers and ICP odometry."""
+
+    def __init__(self):
+        self.map_frame = rospy.get_param('~map_frame', 'fused_map')
+        """Frame created by this node (wcf)."""
+        self.body_frame = None  # read from incoming odometry messages
+        """Frame of the robot body (rcf)."""
+        self.odom_frame = None  # read from incoming odometry messages
+        """Frame of the incoming odometry."""
+        self.fuse_icp_slam = rospy.get_param('~fuse_icp_slam', False)
+        # self.fuse_icp_slam = False
+        """Whether to fuse ICP SLAM odometry."""
+
+        self.tf_timeout = rospy.Duration(float(rospy.get_param('~tf_timeout', 0.25)))
+        """Timeout waiting for TF transforms [s]."""
+
+        self.rate = rospy.Rate(rospy.get_param('~optimization_rate', 10))
+        """Maximum rate at which optimization is done [Hz]. If it takes longer, the rate can be lower."""
+
+        self.min_time_between_fg_states = rospy.Duration(float(rospy.get_param("~min_time_between_fg_states", 0.25)))
+        """Specifies the minimum time difference between two consecutive factorgraph states. If markers would come
+        earlier since the last state has been created, they are ignored. This has only one exception: when a marker
+        is first seen after a long time without any markers, it is always added, even if the previous state was
+        added just a while ago and the time difference is lower."""
+
+        self.max_time_between_fg_states = rospy.Duration(float(rospy.get_param("~max_time_between_fg_states", 1.0)))
+        """Specifies the maximum time difference between two consecutive factorgraph states. If no marker is observed
+        for this amount of time, a new state without any markers is created."""
+
+        self.visualize = bool(rospy.get_param("~visualize", True))
+        """Whether to show visualization of the factorgraph optimization."""
+
+        # TASK INPUT START
+
+        self.abs_marker_id = int(rospy.get_param('abs_marker_id', 7))
+        """ID of the Apriltag from family tag16h5 used as absolute marker. This is given as task input."""
+        self.rel_marker_id = int(rospy.get_param('rel_marker_id', 4))
+        """ID of the Apriltag from family tag16h5 used as relative marker. This is given as task input."""
+        self.ma = (
+            float(rospy.get_param("abs_marker_x", 1.0)),
+            float(rospy.get_param("abs_marker_y", 0.07)),
+            float(rospy.get_param("abs_marker_yaw", 0.2)),
+        )
+
+        self.mr_gt = None
+        if rospy.has_param("rel_marker_gt_x"):
+            self.mr_gt = (
+                float(rospy.get_param("rel_marker_gt_x", -2.667)),
+                float(rospy.get_param("rel_marker_gt_y", -0.6)),
+                float(rospy.get_param("rel_marker_gt_yaw", np.pi)),
+            )
+
+        # TASK INPUT END
+
+        self.c_odom_default = float(rospy.get_param("~c_odom_default", 1.0))
+        """Default cost used for odometry measurements if their twist covariance is invalid."""
+        self.c_odom_scale = float(rospy.get_param("~c_odom_scale", 1.0))
+        """Scale of cost used for odometry measurements with valid twist covariance."""
+        self.c_odom_bumper_scale = float(rospy.get_param("~c_odom_bumper_scale", 0.0))
+        """Scale of cost used for odometry measurements when bumper is active."""
+        self.c_icp_default = float(rospy.get_param("~c_icp_default", 1.0))
+        """Default cost used for ICP odometry measurements if their twist covariance is invalid."""
+        self.c_icp_scale = float(rospy.get_param("~c_icp_scale", 1.0))
+        """Scale of cost used for ICP odometry measurements with valid twist covariance."""
+        self.c_icp_yaw_scale = float(rospy.get_param("~c_icp_yaw_scale", 1.0))
+        """Extra scale for ICP yaw residuals."""
+        self.c_mr_scale = float(rospy.get_param("~c_mr_scale", 1.0))
+        """Scale of cost used for relative marker pose."""
+        self.c_ma_scale = float(rospy.get_param("~c_ma_scale", 2.0))
+        """Scale of cost used for absolute marker pose."""
+        self.c_marker_yaw_scale = float(rospy.get_param("~c_marker_yaw_scale", 1.0))
+        """Extra scale for marker yaw residuals."""
+
+        self.ignore_spurious_markers = bool(rospy.get_param("~ignore_spurious_markers", True))
+        """Whether to ignore markers that were not seen at least twice in a row."""
+        self.spurious_marker_duration_threshold = rospy.Duration(
+            float(rospy.get_param("~spurious_marker_duration_threshold", 1.0)))
+        """Maximum duration between two valid marker detections. If the duration is larger, the marker is discarded as
+        spurious detection."""
+        self.marker_max_dist = float(rospy.get_param("~marker_max_dist", 3.2))
+        """Maximum distance of valid markers [m]. Markers further away are ignored."""
+        self.marker_max_roll_pitch = float(rospy.get_param("~marker_max_roll_pitch", 0.5))
+        """Maximum roll and pitch of valid markers [rad]. Markers with higher inclination are ignored."""
+        self.marker_filter_by_gt = bool(rospy.get_param("~marker_filter_by_gt", False))
+
+        self.publish_tf = rospy.get_param('~publish_tf', True)
+        """Whether to publish the map->odom transform."""
+        self.invert_tf = rospy.get_param('~invert_tf', True)
+        """Whether to invert the published transform so that odom->map is published. This is a hack to allow multiple
+        "parents" for the odom transform (one of them is ICP frame)."""
+
+        # Prepare the factorgraph structure
+
+        # (loss, f_scale) tested configs: ('linear', 1.0), ('soft_l1', 0.05), ('huber', 1.0), ('cauchy', 1.9)
+        solver_options = {
+            'method': rospy.get_param("~opt_method", "trf"),
+            'loss': rospy.get_param("~opt_loss", "soft_l1"),
+            'f_scale': float(rospy.get_param("~opt_f_scale", 0.05)),
+            'max_nfev': int(rospy.get_param("~opt_max_nfev", 40)),
+            'x_scale': rospy.get_param("~opt_x_scale", 1),  # float or 'jac'
+            'verbose': int(rospy.get_param("~opt_verbose", 1)),
+            'ftol': float(rospy.get_param("~opt_ftol", 1e-3)),
+            'gtol': float(rospy.get_param("~opt_gtol", 1e-8)),
+            'xtol': float(rospy.get_param("~opt_xtol", 1e-4)),
+        }
+        all_methods_options = dict(rospy.get_param("~opt_method_options", {}))
+        method_options = all_methods_options.get(solver_options['method'], {})
+
+        self.fg = FactorGraph(ma=self.ma, mr_gt=self.mr_gt, fuse_icp=self.fuse_icp_slam,
+                              solver_options=solver_options, method_options=method_options,
+                              icp_yaw_scale=self.c_icp_yaw_scale, marker_yaw_scale=self.c_marker_yaw_scale)
+        """The factorgraph implementation."""
+        self.mutex = Lock()
+        """Mutex protecting internal state of the factorgraph. It is essential to not add measurements during
+        optimization."""
+        self.vis_queue = multiprocessing.Queue()
+
+        # Helper variables for time synchronization of measurements
+
+        self.fg_initialized = False
+        """Whether the FG has already been initialized with at least one odometry measurement."""
+        self.last_fg_state_add_time: Optional[rospy.Time] = None
+        """The last time a new state has been added to the factorgraph."""
+        self.last_fg_state_has_marker = False
+        """Whether the latest added FG state had a valid marker detection in it or not."""
+        self.last_odom = None
+        """Last odometry message."""
+        self.odom_integrator = OdomIntegrator()
+        """All wheeled odometry messages since last update. It is reset after creating a new factorgraph state."""
+        self.icp_odom_integrator = OdomIntegrator()
+        """All ICP odometry messages since last update. It is reset after creating a new factorgraph state."""
+        self.last_gt_odom = list()
+        """Last ground truth odometry messages. It is reset to empty list after receiving odom and updating the
+        graph."""
+        self.last_gt_odom_msg: Optional[Odometry] = None
+        """Last ground truth odometry message."""
+        self.last_marker_stamps = {}
+        """Dict containing the last time each marker was seen. It is used to detect spurious marker detections."""
+        self.bumpers_active = False
+        """Whether bumpers are currently activated."""
+        self.bumpers_active_times = set()
+        """Set of timestamps when bumpers were activated."""
+        self.has_new_data = False
+
+        # Prepare publishers and subscribers
+
+        self.tf_pub = tf2_ros.TransformBroadcaster()
+        """Publisher of transforms."""
+
+        self.tf = tf2_ros.Buffer()
+        """Transform buffer used for querying the TF tree."""
+        self.tf_sub = tf2_ros.TransformListener(self.tf)
+        """Transform listener filling `self.tf` with transforms published by other nodes."""
+
+        self.odom_pub = rospy.Publisher('fused_odom', Odometry, queue_size=5)
+        self.rel_marker_pub = rospy.Publisher('relative_marker_pose', PoseStamped, queue_size=5)
+        self.marker_viz_pub = rospy.Publisher('fused_odom_viz', MarkerArray, queue_size=5)
+        self.path_pub = rospy.Publisher('fused_odom_path', Path, queue_size=5)
+
+        self.marker_detections_sub = rospy.Subscriber(
+            'apriltag', AprilTagDetectionArray, self.process_marker_detections, queue_size=5)
+        self.odom_sub = rospy.Subscriber('odom', Odometry, self.process_odom, queue_size=50)
+        self.icp_odom_sub = rospy.Subscriber('icp_odom', Odometry, self.process_icp_odom, queue_size=50)
+        self.gt_odom_sub = rospy.Subscriber('ground_truth_odom', Odometry, self.process_gt_odom, queue_size=50)
+        self.bumpers_sub = rospy.Subscriber(
+            'mobile_base/sensors/core', SensorState, self.process_bumpers, queue_size=50)
+        self.bumpers_sim_sub = rospy.Subscriber('bumper', ContactsState, self.process_bumpers_sim, queue_size=50)
+
+    def process_marker_detections(self, msg: AprilTagDetectionArray) -> None:
+        """Callback for detected markers. It may add a new state to the graph if markers are visible.
+
+        :param msg: The received message.
+        """
+        # body_frame is read from odometry messages; we thus can't handle marker detections until some odometry came
+        if self.body_frame is None:
+            return
+        z_ma, c_ma, z_mr, c_mr = self.extract_markers(msg)
+        if not self.fg_initialized:
+            return
+        if np.all(np.isnan(z_ma)) and np.all(np.isnan(z_mr)):
+            return
+        if self.last_fg_state_add_time is not None and self.last_fg_state_has_marker and \
+                msg.header.stamp < (self.last_fg_state_add_time + self.min_time_between_fg_states):
+            return
+
+        self.add_z(msg.header.stamp, z_ma, z_mr, c_ma, c_mr)
+
+    def process_icp_odom(self, msg: Odometry) -> None:
+        """Callback for ICP odometry.
+
+        :param msg: The received message.
+        """
+        self.icp_odom_integrator.add(msg, rospy.Time.now())
+
+    def process_gt_odom(self, msg: Odometry) -> None:
+        """Callback for ground truth odometry.
+
+        :param msg: The received message.
+        """
+        self.last_gt_odom.append(msg)
+        self.last_gt_odom_msg = copy.deepcopy(msg)
+
+    def process_bumpers(self, msg: SensorState) -> None:
+        """Callback for real robot state (for bumper state extraction).
+
+        :param msg: The received message.
+        """
+        self.bumpers_active = msg.bumper > 0
+
+    def process_bumpers_sim(self, msg: ContactsState) -> None:
+        """Callback for simulated bumper.
+
+        :param msg: The received message.
+        """
+        self.bumpers_active = len(msg.states) > 0
+
+    def process_odom(self, msg: Odometry) -> None:
+        """Callback for odometry. This callback adds a new state to the factorgraph.
+
+        :param msg: The received message.
+        """
+        self.odom_frame = msg.header.frame_id
+        self.body_frame = msg.child_frame_id
+
+        self.odom_integrator.add(msg, rospy.Time.now())
+
+        if self.last_fg_state_add_time is not None and \
+                msg.header.stamp < (self.last_fg_state_add_time + self.max_time_between_fg_states):
+            return
+
+        # If this is the first odometry message, just store it in the factorgraph and stop, there is nothing to do.
+        if not self.fg_initialized:
+            self.fg_initialized = True
+            self.last_fg_state_add_time = msg.header.stamp
+            with self.mutex:
+                yaw = euler_from_quaternion(numpify(msg.pose.pose.orientation))[2]
+                self.fg.state.x[0, :] = [msg.pose.pose.position.x, msg.pose.pose.position.y, yaw]
+                self.fg.state.x_odom[0, :] = self.fg.state.x[0, :]
+            return
+
+        self.add_z(msg.header.stamp)
+
+    def add_z(self, stamp: rospy.Time, z_ma: Sequence[float] = (np.nan,) * 3, z_mr: Sequence[float] = (np.nan,) * 3,
+              c_ma: np.ndarray = np.zeros((3, 3)), c_mr: np.ndarray = np.zeros((3, 3))):
+        """Add a new measurement to the factorgraph.
+
+        :param stamp: Timestamp of the measurement.
+        :param z_ma: Observation of the absolute marker (Numpy array 3), NaN when not seen.
+        :param z_mr: Observation of the relative marker (Numpy array 3), NaN when not seen.
+        :param c_ma: Cost for the absolute marker measurement (Numpy array 3x3).
+        :param c_mr: Cost for the relative marker measurements (Numpy array 3x3).
+        """
+
+        t_odom = stamp.to_nsec()
+        if self.bumpers_active:
+            self.bumpers_active_times.add(stamp)
+
+        # Compute odometry measurements and their costs
+        odom_samples_ros = self.odom_integrator.sample(stamp)
+        odom_samples = {}
+        for t in odom_samples_ros:
+            twist, cov = odom_samples_ros[t].twist, odom_samples_ros[t].twist_cov
+            odom_samples[t.to_nsec()] = \
+                twist, self.get_cost_from_twist_covariance(cov, self.c_odom_default, self.c_odom_scale)
+            if t in self.bumpers_active_times:
+                odom_samples[t.to_nsec()] = np.zeros(3), odom_samples[t.to_nsec()][1] * self.c_odom_bumper_scale
+
+        # Compute ICP measurement and its cost
+        icp_samples_ros = self.icp_odom_integrator.sample(stamp)
+        icp_samples = {}
+        for t in icp_samples_ros:
+            twist, cov = icp_samples_ros[t].twist, icp_samples_ros[t].twist_cov
+            icp_samples[t.to_nsec()] = \
+                twist, self.get_cost_from_twist_covariance(cov, self.c_icp_default, self.c_icp_scale)
+
+        # Ground truth odometry (only in simulator)
+        if len(self.last_gt_odom) == 0:
+            z_gt_odom = (np.nan, np.nan, np.nan)
+        else:
+            gt = min(self.last_gt_odom, key=lambda m: abs(m.header.stamp.to_nsec() - t_odom))
+            yaw = euler_from_quaternion(numpify(gt.pose.pose.orientation))[2]
+            z_gt_odom = (gt.pose.pose.position.x, gt.pose.pose.position.y, yaw)
+            self.last_gt_odom = list()
+
+        self.last_fg_state_add_time = stamp
+        self.last_fg_state_has_marker = np.any(~np.isnan(z_ma)) or np.any(~np.isnan(z_mr))
+
+        # Add the measurements to the factorgraph.
+        with self.mutex:
+            state = copy.deepcopy(self.fg.state)
+
+        # In some weird scenario, state can be incomplete here. Don't really know why.
+        if not hasattr(state, 'stamps_idx') or state.stamps_idx is None:
+            rospy.logerr("Weird state structure: " + repr(state))
+            return
+
+        # Filter out odom samples from times that were not added to the FG
+        odom_samples = {t: v for t, v in odom_samples.items() if t in state.stamps_idx or t == t_odom}
+        icp_samples = {t: v for t, v in icp_samples.items() if t in state.stamps_idx or t == t_odom}
+
+        state = FactorGraph.add_z(state, self.fg.config,
+            odom_samples, z_mr, c_mr, z_ma, c_ma, icp_samples, z_gt_odom, t_odom)
+
+        with self.mutex:
+            # If optimization finished before we added the measurement, copy over the results of the optimization
+            state.x[:self.fg.state.x.shape[0], :] = self.fg.state.x
+            state.mr = self.fg.state.mr
+            self.fg.state = state
+            if self.visualize:
+                try:
+                    self.vis_queue.put((state, self.fg.config), block=False)
+                except Full:
+                    pass
+
+        self.has_new_data = True
+
+    def get_cost_from_twist_covariance(self, covariance: np.ndarray, c_default: float, c_scale: float) -> np.ndarray:
+        """Computes cost matrix for a measurement based on covariance of odometry twist (velocity).
+
+        :param covariance: The covariance matrix (Numpy array 3x3).
+        :param c_default: Default cost to be used in case the covariance is invalid.
+        :param c_scale: Scale of the cost.
+        :return: The cost (Numpy array 3x3).
+        """
+        if covariance[0, 0] <= 0:
+            return np.eye(3) * c_default
+        return c_scale * scipy.linalg.sqrtm(np.linalg.inv(covariance + np.eye(3) * 1e-15))
+
+    def optimize(self) -> None:
+        """Perform factorgraph-based trajectory optimization and publish the results."""
+
+        if self.fg.state.z_odom.shape[1] == 0:
+            return
+
+        # Make local copies of the factorgraph internal state so that new measurements can be added to it while the
+        # optimization is running. We will only optimize as many measurements as are available up to now.
+        # Also, the measurements are converted from Python lists to numpy arrays to allow faster operations on them
+        # not that they have a static size (Python list has good performance for resizing, but bad for computations;
+        # numpy arrays have bad performance for resizing, but good for computations).
+        with self.mutex:
+            state = copy.deepcopy(self.fg.state)
+
+        # Run optimization on the local copies
+        state = FactorGraph.optimize(state, self.fg.config)
+
+        # Write the optimized estimates back to the factorgraph
+        with self.mutex:
+            # If measurements were added during optimization, fg.x is longer than our local copy. Make sure to only
+            # update as many values as we optimized.
+            self.fg.state.x[:len(state.x), :] = state.x
+            self.fg.state.mr = state.mr
+            self.fg.state.last_optimized_idx = state.last_optimized_idx
+            # Converting mr to list prevents the visualization code calling quaternion_from_euler from changing the
+            # mr values (this is a usability bug of quaternion_from_euler).
+            mr = np.ravel(state.mr).tolist()
+            # If measurements were added during optimization, recompute the added pose estimates based on the optimized
+            # values that were just computed - i.e. extend the last optimized pose with new odometry measurements to
+            # create better initial guesses for the newly received measurements. This step is not needed in theory, but
+            # it should help the optimizer in the next step by removing the discontinuity that might occur.
+            for i in range(state.x.shape[0], self.fg.state.x.shape[0]):
+                if np.any(np.isnan(self.fg.state.x[i - 1, :])) or np.any(np.isnan(self.fg.state.z_odom[:, i - 1])):
+                    break
+                self.fg.state.x[i, :] = r2w(self.fg.state.z_odom[:, i - 1], self.fg.state.x[i - 1, :]).ravel()
+            state.x = copy.deepcopy(self.fg.state.x)  # For visualization
+            x = state.x
+
+        # Publish messages and transforms
+
+        last_valid_idx = min(x.shape[0] - 1, len(state.stamps))
+        while last_valid_idx >= 0 and np.any(np.isnan(x[last_valid_idx, :])):
+            last_valid_idx -= 1
+
+        if last_valid_idx < 0:
+            return
+
+        last_t = rospy.Time(0, state.stamps[last_valid_idx - 1])
+
+        # Fused odometry message
+        msg = Odometry()
+        msg.header.frame_id = self.map_frame
+        msg.header.stamp = last_t
+        msg.child_frame_id = self.body_frame
+        msg.pose.pose.position.x = x[last_valid_idx, 0]
+        msg.pose.pose.position.y = x[last_valid_idx, 1]
+        msg.pose.pose.orientation = msgify(Quaternion, quaternion_from_euler(0, 0, x[last_valid_idx, 2]))
+        self.odom_pub.publish(msg)
+
+        try:
+            # The transform should already be there as we have already received the corresponding odom message and
+            # finished the optimization. That's why the transform timeout is so short here.
+            body_to_odom = self.tf.lookup_transform(self.body_frame, self.odom_frame, last_t, rospy.Duration(0.001))
+            body_to_odom_np = numpify(body_to_odom.transform)
+            map_to_body_np = numpify(msg.pose.pose)
+
+            # Compute the differential transform map->odom
+            map_to_odom_np = np.matmul(map_to_body_np, body_to_odom_np)
+
+            # Publish the transform
+            tf = TransformStamped()
+            tf.header.frame_id = self.map_frame if not self.invert_tf else self.odom_frame
+            tf.header.stamp = last_t
+            tf.child_frame_id = self.odom_frame if not self.invert_tf else self.map_frame
+            tf.transform = msgify(Transform, map_to_odom_np if not self.invert_tf else np.linalg.inv(map_to_odom_np))
+            self.tf_pub.sendTransform(tf)
+        except TransformException as ex:
+            rospy.logwarn_throttle(1.0, 'Could not transform %s to frame %s: %s.', self.odom_frame, self.body_frame, ex)
+
+        # Publish the pose of the relative marker
+
+        if not np.any(np.isnan(mr)):  # only publish when the marker pose changed from the init value
+            p = np.array(mr).ravel().tolist()
+            mr_pose = PoseStamped()
+            mr_pose.header.frame_id = self.map_frame
+            mr_pose.header.stamp = last_t
+            mr_pose.pose.position.x, mr_pose.pose.position.y = p[0], p[1]
+            mr_pose.pose.orientation = msgify(Quaternion, quaternion_from_euler(0, 0, p[2]))
+
+            self.rel_marker_pub.publish(mr_pose)
+
+        # Marker positions visualization message
+        markers_msg = MarkerArray()
+
+        # Relative marker
+        if not np.any(np.isnan(mr)):
+            marker = self.create_arrow_marker(mr)
+            marker.header.stamp = msg.header.stamp
+            marker.id = self.rel_marker_id
+            marker.ns = "mr"
+            marker.color.r = 0
+            marker.color.g = 1
+            marker.color.b = 1
+            markers_msg.markers.append(marker)
+
+        # Relative marker ground truth
+        if self.fg.config.mr_gt is not None:
+            marker = self.create_arrow_marker(self.fg.config.mr_gt[:, 0])
+            marker.header.stamp = msg.header.stamp
+            marker.id = -self.rel_marker_id
+            marker.ns = "mr_gt"
+            marker.color.a = 0.5
+            marker.color.r = 1
+            marker.color.g = 1
+            marker.color.b = 0
+            markers_msg.markers.append(marker)
+
+        # Absolute marker
+        marker = self.create_arrow_marker(self.fg.config.ma)
+        marker.header.stamp = msg.header.stamp
+        marker.id = self.abs_marker_id
+        marker.ns = "ma"
+        markers_msg.markers.append(marker)
+
+        self.marker_viz_pub.publish(markers_msg)
+
+        # Whole optimized trajectory message (not very efficient, mostly for debug)
+        msg = Path()
+        msg.header.frame_id = self.map_frame
+        msg.header.stamp = last_t
+        for i in range(last_valid_idx + 1):
+            pose = PoseStamped()
+            pose.header = msg.header
+            pose.pose.position.x = x[i, 0]
+            pose.pose.position.y = x[i, 1]
+            pose.pose.orientation = msgify(Quaternion, quaternion_from_euler(0, 0, x[i, 2]))
+            msg.poses.append(pose)
+        self.path_pub.publish(msg)
+
+        if self.visualize:
+            try:
+                self.vis_queue.put((state, self.fg.config), block=False)
+            except Full:
+                pass
+
+    def create_arrow_marker(self, pos: np.ndarray) -> Marker:
+        # Beware, if pos[2] result would be np.ndarray, the quaternion_from_euler call would overwrite the pos[2] value!
+        # Thus, we make a local copy of pos.
+        p = np.array(pos).ravel().tolist()
+        marker = Marker()
+        marker.header.frame_id = self.map_frame
+        marker.color.a = 1
+        marker.scale.x = marker.scale.y = marker.scale.z = 0.3
+        marker.action = Marker.ADD
+        marker.type = Marker.ARROW
+        marker.pose.position.x, marker.pose.position.y = p[0], p[1]
+        marker.pose.orientation = msgify(Quaternion, quaternion_from_euler(0, 0, p[2]))
+        return marker
+
+    def reset(self):
+        """Handle ROS time jump. Not implemented for this node."""
+        sys.exit(1)
+
+    def run(self) -> None:
+        """Start the node and do its work."""
+        if self.visualize:
+            vis = FactorGraphVisualizer()
+            plot_process = Process(target=vis, args=(self.vis_queue,), daemon=True)
+            plot_process.start()
+
+        while not rospy.is_shutdown():
+            try:
+                self.rate.sleep()
+            except rospy.ROSTimeMovedBackwardsException:
+                rospy.logwarn("ROS time moved backwards")
+                self.reset()
+                continue
+            except rospy.ROSInterruptException:
+                break
+
+            if self.has_new_data:
+                self.has_new_data = False
+                self.optimize()
+
+        if self.visualize:
+            try:
+                self.vis_queue.put((None, None), block=True, timeout=2)
+                plot_process.join()
+            except Full:
+                pass
+
+    def extract_markers(self, m: AprilTagDetectionArray) -> \
+            Tuple[Sequence[float], np.ndarray, Sequence[float], np.ndarray]:
+        """Extract marker measurements from an Apriltag detection message.
+
+        This code does a lot of pre-filtering of the detections because the output of the apriltag detector is not very
+        reliable. Choose difficulty of the task by selecting easy/medium/hard configs in aro_loc.launch. The more
+        difficult configs do less pre-filtering, which results in more false positive measurements which confuse the
+        localization process.
+
+        :param m: The Apriltag detections.
+        :return: The measurements (z_ma, c_ma, z_mr, c_mr).
+        """
+        z_ma = (np.nan, np.nan, np.nan)
+        z_mr = (np.nan, np.nan, np.nan)
+        c_ma = np.zeros((3, 3))
+        c_mr = np.zeros((3, 3))
+
+        for det in m.detections:
+            if len(det.id) != 1:  # len != 1 would be for bundled tags, but we don't use bundles
+                continue
+            det_id = det.id[0]
+            if det_id not in (self.rel_marker_id, self.abs_marker_id):  # check if it is a marker of interest
+                continue
+            # Discard first detection of each marker, but remember its timestamp for spurious tag detection.
+            if det_id not in self.last_marker_stamps:
+                self.last_marker_stamps[det_id] = det.pose.header.stamp
+                continue
+            # Discard spurious tag detections (i.e. tags without multiple successive detections).
+            time_from_previous = det.pose.header.stamp - self.last_marker_stamps[det_id]
+            self.last_marker_stamps[det_id] = det.pose.header.stamp
+            if self.ignore_spurious_markers and time_from_previous > self.spurious_marker_duration_threshold:
+                rospy.logwarn_throttle(1.0, "Ignoring spurious detection of marker " + str(det_id))
+                continue
+
+            # Transform the marker pose from camera frame to body frame.
+            try:
+                pose_stamped = PoseStamped()
+                pose_stamped.pose = det.pose.pose.pose
+                pose_stamped.header = det.pose.header
+                body_pose: Pose = self.tf.transform(pose_stamped, self.body_frame, timeout=self.tf_timeout).pose
+            except tf2_ros.TransformException as e:
+                rospy.logerr("Could not transform apriltag to body frame: " + str(e))
+                continue
+
+            # Throw away markers that are far, they are probably bad detections.
+            x = body_pose.position.x
+            y = body_pose.position.y
+            dist = np.linalg.norm((x, y))
+            if dist > self.marker_max_dist:
+                rospy.logerr_throttle(5.0, "Discarding marker %i, it is %.1f m far." % (det_id, dist))
+                continue
+            rospy.logdebug_throttle(5.0, "Marker %i is %.1f m far." % (det_id, dist))
+
+            if self.marker_filter_by_gt and np.abs(body_pose.position.z - 0.14) > 0.05:
+                rospy.logerr("Discarding marker %i, its Z coordinate is %.2f, while it should be 0.14." %
+                             (det_id, body_pose.position.z))
+                continue
+
+            # Rotate the apriltag frame so that it corresponds to x forward, y left and z up.
+            marker_frame_rot = np.array(quaternion_from_euler(-math.pi / 2, math.pi / 2, 0))
+            q = numpify(body_pose.orientation)
+            q = quaternion_multiply(q, marker_frame_rot)
+            roll, pitch, yaw = euler_from_quaternion(q)
+            roll = normalize_angle_symmetric(roll)
+            pitch = normalize_angle_symmetric(pitch)
+            roll = min(abs(roll), np.pi - abs(roll))
+            pitch = min(abs(pitch), np.pi - abs(pitch))
+
+            if max(abs(roll), abs(pitch)) > self.marker_max_roll_pitch:
+                rospy.logerr_throttle(5.0, "Discarding marker %i due to too high roll (%f deg) or pitch (%f deg)." % (
+                    det_id, roll * 180 / np.pi, pitch * 180 / np.pi))
+                continue
+
+            if self.marker_filter_by_gt and (det_id == self.abs_marker_id or self.mr_gt is not None) and \
+                    self.last_gt_odom_msg is not None:
+                gt = self.ma if det_id == self.abs_marker_id else self.mr_gt
+                tf = numpify(self.last_gt_odom_msg.pose.pose)
+                pos = tf @ np.hstack((numpify(body_pose.position), np.array((1,))))
+                dist = np.linalg.norm(np.array(gt)[:2] - pos[:2])
+                if dist > 0.1:
+                    rospy.logerr_throttle(5.0, "Discarding marker %i because it is %.1f m from GT position." % (
+                        det_id, dist))
+                    continue
+
+            # Cost of the marker is proportional to its distance from the robot and the angle under which it is seen.
+            base_cost_dist = ((self.marker_max_dist - dist) / self.marker_max_dist + 0.1)
+            base_cost_ang = 1.0 - np.abs(yaw) / (np.pi / 2) + 0.1
+            c = np.diag((base_cost_dist, base_cost_dist, base_cost_ang))
+
+            if det_id == self.rel_marker_id:
+                z_mr = (x, y, yaw)
+                c_mr = self.c_mr_scale * c
+            else:
+                z_ma = (x, y, yaw)
+                c_ma = self.c_ma_scale * c
+
+        return z_ma, c_ma, z_mr, c_mr
+
+
+class FactorGraphVisualizer:
+    def __init__(self):
+        self.data = None
+        self.stop = False
+        self.mutex = Lock()
+
+    def __call__(self, queue):
+        for f in glob.glob("/tmp/fig*.png"):
+            os.remove(f)
+
+        t = Thread(target=self.plot, daemon=True)
+        t.start()
+
+        while True:
+            try:
+                data = queue.get(block=True, timeout=1)
+            except Empty:
+                continue
+
+            if data[0] is None:
+                self.stop = True
+                with self.mutex:
+                    self.data = data
+                return False
+
+            with self.mutex:
+                self.data = data
+
+    def plot(self):
+        np.seterr(all='raise')
+        while not self.stop:
+            with self.mutex:
+                data = self.data
+                self.data = None
+            if data is None:
+                time.sleep(0.1)
+                continue
+            state, config = data
+            try:
+                FactorGraph.visu(state, config)
+            except Exception as e:
+                print(traceback.format_exc())
+        plt.close('all')
+
+
+def main():
+    rospy.init_node('aro_localization')
+    node = FactorGraphLocalizationNode()
+    node.run()
+
+
+if __name__ == '__main__':
+    main()

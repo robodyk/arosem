@@ -1,0 +1,53 @@
+<!--
+    Run the apriltag detector.
+    
+    On real robots, we need to use infra cameras because the color camera has a very bad rolling shutter effect.
+-->
+
+<launch>
+    <arg name="simulation" />
+    
+    <group if="$(arg simulation)">
+        <arg name="camera_name" default="rgb" />
+        <arg name="camera" default="camera/$(arg camera_name)" />
+
+        <node name="$(arg camera_name)_decompress" pkg="image_transport" type="republish" args="compressed raw" respawn="true">
+            <remap from="in" to="$(arg camera)/image_raw" />
+            <remap from="out" to="apriltag_camera/image_decompressed" />
+        </node>
+
+        <node name="$(arg camera_name)_rectify" pkg="nodelet" type="nodelet" args="standalone image_proc/rectify" respawn="true">
+            <remap from="image_mono" to="apriltag_camera/image_decompressed"/>
+            <remap from="camera_info" to="apriltag_camera/camera_info"/>
+            <remap from="image_rect" to="apriltag_camera/image_rect"/>
+        </node>
+
+        <node name="$(arg camera_name)_republish_caminfo" pkg="cras_topic_tools" type="relay" respawn="true"
+              args="$(arg camera)/camera_info apriltag_camera/camera_info" />
+    </group>
+
+    <group unless="$(arg simulation)">
+        <arg name="camera_name" default="infra1" />
+        <arg name="camera" default="camera/$(arg camera_name)" />
+        
+        <node name="$(arg camera_name)_decompress" pkg="image_transport" type="republish" args="compressed raw" respawn="true">
+            <remap from="in" to="$(arg camera)/image_rect_raw" />
+            <remap from="out" to="apriltag_camera/image_rect" />
+        </node>
+    
+        <node name="$(arg camera_name)_republish_caminfo" pkg="cras_topic_tools" type="relay" respawn="true"
+              args="$(arg camera)/camera_info apriltag_camera/camera_info" />
+    </group>
+    
+    <node name="apriltag_detector" pkg="apriltag_ros" type="apriltag_ros_continuous_node" respawn="true" output="log">
+        <rosparam command="load" file="$(dirname)/../../config/localization/apriltags.yaml" />
+
+        <param name="publish_tag_detections_image" type="bool" value="true"/>
+        
+        <remap from="image_rect" to="apriltag_camera/image_rect"/>
+        <remap from="camera_info" to="apriltag_camera/camera_info"/>
+        <remap from="tag_detections" to="apriltag"/>
+        <remap from="tag_detections_image" to="apriltag_camera/apriltag_image"/>
+    </node>
+
+</launch>

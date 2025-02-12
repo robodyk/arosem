@@ -1,0 +1,30 @@
+<launch>
+
+    <arg name="run_manual_control" value="true"/>
+    <arg name="run_controller" default="true"/>
+
+    <include file="$(find aro_sim)/launch/aro_sim.launch" pass_all_args="true">
+      <arg name="rviz" value="true"/>
+      <arg name="world" value="stage_4"/>
+      <arg name="gui" value="false"/>
+      <arg name="fixed_frame" value="world"/>
+      <arg name="odom_frame" value="ground_truth_odom"/>
+      <arg name="keyboard_teleop" value="$(arg run_manual_control)"/>
+      <arg name="rviz_config" value="$(find aro_reactive_control)/rviz/reactive_control_sim.rviz"/>
+    </include>
+
+    <param name="world_description"
+           command="$(find xacro)/xacro $(find aro_sim)/urdf/reactive_control_maze.urdf "/>
+
+
+    <group if="$(arg run_controller)">
+      <node name="reactive_controller" pkg="aro_reactive_control" type="reactive_controller.py" output="screen">
+
+      </node>
+    </group>
+
+    <node name="reactive_controller_evaluator" pkg="aro_reactive_control" type="reactive_control_evaluator.py" output="screen">
+      <param name="use_manual_control" value="$(arg run_manual_control)" />
+    </node>
+    
+</launch>

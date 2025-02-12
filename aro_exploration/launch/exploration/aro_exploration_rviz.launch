@@ -1,0 +1,4 @@
+<launch>
+    <arg name="map_frame" default="icp_map" doc="{icp_map,fused_map}"/>
+    <node name="rviz_exploration" pkg="rviz" type="rviz" args="-d $(dirname)/../../rviz/exploration.rviz -f $(arg map_frame)" />
+</launch>

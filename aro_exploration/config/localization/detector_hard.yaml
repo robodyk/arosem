@@ -1,0 +1,5 @@
+ignore_spurious_markers: False
+spurious_marker_duration_threshold: 1.0
+marker_max_dist: 6.0
+marker_max_roll_pitch: 3.0
+marker_filter_by_gt: False

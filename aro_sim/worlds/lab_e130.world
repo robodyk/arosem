@@ -1,0 +1,237 @@
+<sdf version='1.7'>
+  <world name='default'>
+    <!-- A global light source -->
+    <include>
+      <uri>model://sun</uri>
+    </include>
+
+    <!-- A ground plane -->
+    <include>
+      <uri>model://ground_plane</uri>
+    </include>
+
+    <physics type='ode'>
+      <real_time_update_rate>1000</real_time_update_rate>
+      <max_step_size>0.001</max_step_size>
+      <real_time_factor>1</real_time_factor>
+      <ode>
+        <solver>
+          <type>quick</type>
+          <iters>150</iters>
+          <precon_iters>0</precon_iters>
+          <sor>1.4</sor>
+          <use_dynamic_moi_rescaling>1</use_dynamic_moi_rescaling>
+        </solver>
+        <constraints>
+          <cfm>1e-05</cfm>
+          <erp>0.2</erp>
+          <contact_max_correcting_vel>2000</contact_max_correcting_vel>
+          <contact_surface_layer>0.01</contact_surface_layer>
+        </constraints>
+      </ode>
+    </physics>
+
+    <!-- North wall -->
+
+    <include>
+      <uri>model://wall_1_0</uri>
+      <name>wall_n_0</name>
+      <pose>0.075 0.5 0 0 0 0</pose>
+    </include>
+
+    <include>
+      <uri>model://wall_1_0</uri>
+      <name>wall_n_1</name>
+      <pose>0.075 1.5 0 0 0 0</pose>
+    </include>
+
+    <include>
+      <uri>model://wall_1_0</uri>
+      <name>wall_n_3</name>
+      <pose>0.075 -0.5 0 0 0 0</pose>
+    </include>
+
+    <include>
+      <uri>model://wall_0_1</uri>
+      <name>wall_n_4</name>
+      <pose>0.075 -1.05 0 0 0 0</pose>
+    </include>
+
+    <include>
+      <uri>model://wall_0_1</uri>
+      <name>wall_n_5</name>
+      <pose>0.075 -1.15 0 0 0 0</pose>
+    </include>
+
+    <include>
+      <uri>model://wall_0_1</uri>
+      <name>wall_n_6</name>
+      <pose>0.075 -1.25 0 0 0 0</pose>
+    </include>
+
+    <!-- West wall -->
+
+    <include>
+      <uri>model://wall_1_0</uri>
+      <name>wall_w_0</name>
+      <pose>-0.35 2.075 0 0 0 1.5708</pose>
+    </include>
+
+    <include>
+      <uri>model://wall_1_0</uri>
+      <name>wall_w_1</name>
+      <pose>-1.35 2.075 0 0 0 1.5708</pose>
+    </include>
+
+    <include>
+      <uri>model://wall_1_0</uri>
+      <name>wall_w_2</name>
+      <pose>-2.35 2.075 0 0 0 1.5708</pose>
+    </include>
+
+    <include>
+      <uri>model://wall_1_0</uri>
+      <name>wall_w_3</name>
+      <pose>-3.35 2.075 0 0 0 1.5708</pose>
+    </include>
+
+    <include>
+      <uri>model://wall_0_1</uri>
+      <name>wall_w_4</name>
+      <pose>-3.90 2.075 0 0 0 1.5708</pose>
+    </include>
+
+    <include>
+      <uri>model://wall_0_1</uri>
+      <name>wall_w_5</name>
+      <pose>-4.00 2.075 0 0 0 1.5708</pose>
+    </include>
+
+    <include>
+      <uri>model://wall_0_1</uri>
+      <name>wall_w_6</name>
+      <pose>-4.10 2.075 0 0 0 1.5708</pose>
+    </include>
+
+    <include>
+      <uri>model://wall_0_1</uri>
+      <name>wall_w_7</name>
+      <pose>-4.20 2.075 0 0 0 1.5708</pose>
+    </include>
+
+    <!-- South wall -->
+
+    <include>
+      <uri>model://wall_1_0</uri>
+      <name>wall_s_0</name>
+      <pose>-4.225 0.5 0 0 0 0</pose>
+    </include>
+
+    <include>
+      <uri>model://wall_1_0</uri>
+      <name>wall_s_1</name>
+      <pose>-4.225 1.5 0 0 0 0</pose>
+    </include>
+
+    <include>
+      <uri>model://wall_1_0</uri>
+      <name>wall_s_3</name>
+      <pose>-4.225 -0.5 0 0 0 0</pose>
+    </include>
+
+    <include>
+      <uri>model://wall_0_1</uri>
+      <name>wall_s_4</name>
+      <pose>-4.225 -1.05 0 0 0 0</pose>
+    </include>
+
+    <include>
+      <uri>model://wall_0_1</uri>
+      <name>wall_s_5</name>
+      <pose>-4.225 -1.15 0 0 0 0</pose>
+    </include>
+
+    <include>
+      <uri>model://wall_0_1</uri>
+      <name>wall_s_6</name>
+      <pose>-4.225 -1.25 0 0 0 0</pose>
+    </include>
+
+    <!-- East wall -->
+
+    <include>
+      <uri>model://wall_1_0</uri>
+      <name>wall_e_0</name>
+      <pose>-0.35 -1.375 0 0 0 1.5708</pose>
+    </include>
+
+    <include>
+      <uri>model://wall_1_0</uri>
+      <name>wall_e_1</name>
+      <pose>-1.35 -1.375 0 0 0 1.5708</pose>
+    </include>
+
+    <include>
+      <uri>model://wall_1_0</uri>
+      <name>wall_e_2</name>
+      <pose>-2.35 -1.375 0 0 0 1.5708</pose>
+    </include>
+
+    <include>
+      <uri>model://wall_1_0</uri>
+      <name>wall_e_3</name>
+      <pose>-3.35 -1.375 0 0 0 1.5708</pose>
+    </include>
+
+    <include>
+      <uri>model://wall_0_1</uri>
+      <name>wall_e_4</name>
+      <pose>-3.90 -1.375 0 0 0 1.5708</pose>
+    </include>
+
+    <include>
+      <uri>model://wall_0_1</uri>
+      <name>wall_e_5</name>
+      <pose>-4.00 -1.375 0 0 0 1.5708</pose>
+    </include>
+
+    <include>
+      <uri>model://wall_0_1</uri>
+      <name>wall_e_6</name>
+      <pose>-4.10 -1.375 0 0 0 1.5708</pose>
+    </include>
+
+    <include>
+      <uri>model://wall_0_1</uri>
+      <name>wall_e_7</name>
+      <pose>-4.20 -1.375 0 0 0 1.5708</pose>
+    </include>
+
+    <!-- Obstacle -->
+
+    <include>
+      <uri>model://wall_1_0</uri>
+      <name>obstacle_0</name>
+      <pose>-3.32 1.07 0 0 0 0</pose>
+    </include>
+
+    <include>
+      <uri>model://wall_1_0</uri>
+      <name>obstacle_1</name>
+      <pose>-3.32 0.17 0 0 0 0</pose>
+    </include>
+
+    <scene>
+      <ambient>0.4 0.4 0.4 1</ambient>
+      <background>0.7 0.7 0.7 1</background>
+      <shadows>true</shadows>
+    </scene>
+
+    <gui fullscreen='0'>
+      <camera name='user_camera'>
+        <pose>0.0 0.0 17.0 0 1.5708 0</pose>
+        <view_controller>orbit</view_controller>
+      </camera>
+    </gui>
+  </world>
+</sdf>

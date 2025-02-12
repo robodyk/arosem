@@ -1,0 +1,43 @@
+<launch>
+    <arg name="marker_difficulty" default="easy" doc="perfect|easy|medium|hard; Chooses the amount of false positives of the apriltag detector." />
+    <arg name="fuse_icp_slam" default="true" />
+    <arg name="localization_visualize" default="false" doc="Show factorgraph internal animation" />
+    <arg name="rviz" default="true" />
+    <arg name="record" default="false"/>
+    <arg name="debug_localization" default="false" doc="Show debugging prints in console" />
+
+
+
+    <node name="aro_localization" pkg="aro_exploration" type="aro_localization" output="screen">
+        <!-- Load parameters of the factorgraph localization. -->
+        <rosparam command="load" file="$(dirname)/../../config/localization/costs_icp.yaml" if="$(arg fuse_icp_slam)" />
+        <rosparam command="load" file="$(dirname)/../../config/localization/costs.yaml" unless="$(arg fuse_icp_slam)" />
+        <rosparam command="load" file="$(dirname)/../../config/localization/detector_$(arg marker_difficulty).yaml" />
+        <rosparam command="load" file="$(dirname)/../../config/localization/solver.yaml" />
+
+        <rosparam subst_value="true">
+            map_frame: fused_map
+            visualize: $(arg localization_visualize)
+            publish_tf: True
+            invert_tf: True
+            fuse_icp_slam: $(arg fuse_icp_slam)
+        </rosparam>
+    </node>
+    <node if="$(arg debug_localization)" pkg="rosservice" type="rosservice" name="localization_set_log_level"
+          args="call --wait /aro_localization/set_logger_level 'rosout' 'debug'" />
+
+    <include file="$(dirname)/apriltags.launch" pass_all_args="true" />
+
+    <node pkg="nav_utils" type="tf_fast_repeater" name="fused_map_fast_publisher">
+        <param name="publish_frequency" value="20" />
+        <param name="error_reporting_defer_time" value="30" />
+        <param name="parent_frame" value="fused_map" />
+        <param name="child_frame" value="icp_map" if="$(arg fuse_icp_slam)" />
+        <param name="child_frame" value="odom" unless="$(arg fuse_icp_slam)" />
+        <param name="new_parent_frame" value="fused_map_fast" />
+    </node>
+
+    <include file="$(dirname)/aro_localization_rviz.launch" pass_all_args="true" if="$(arg rviz)" />
+    
+    <include file="$(dirname)/record.launch" pass_all_args="true" if="$(arg record)" />
+</launch>

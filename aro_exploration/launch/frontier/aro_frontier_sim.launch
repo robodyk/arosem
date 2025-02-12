@@ -1,0 +1,9 @@
+<launch>
+    <arg name="world" default="stage_4"/>
+    <arg name="ground_truth" default="true"/>
+    <arg name="simulation" value="true" />
+
+    <include file="$(dirname)/../sim_robot.launch" pass_all_args="true" />
+    <include file="$(dirname)/aro_frontier.launch" pass_all_args="true"/>
+    <include file="$(dirname)/aro_frontier_dependencies.launch" pass_all_args="true" />
+</launch>

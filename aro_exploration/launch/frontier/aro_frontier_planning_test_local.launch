@@ -1,0 +1,26 @@
+<launch>
+    <arg name="robot_radius" default="$(eval 0.3)"/>
+    <arg name="robot_diameter" default="$(eval 2 * robot_radius)"/>
+    <arg name="map_frame" default="icp_map" doc="{icp_map,fused_map}"/>
+
+    <node pkg="tf2_ros" type="static_transform_publisher" name="map_tf" args="0 0 0 0 0 0 1 icp_map map" />
+    <node name="frontier" pkg="aro_exploration" type="frontier.py">
+        <rosparam subst_value="true">
+            map_frame: $(arg map_frame)
+            robot_frame: base_footprint
+            robot_diameter: $(arg robot_diameter)
+            occupancy_threshold: 90
+        </rosparam>
+    </node>
+    <node name="planner" pkg="aro_exploration" type="planner.py">
+        <rosparam subst_value="true">
+            map_frame: $(arg map_frame)
+            robot_frame: base_footprint
+            robot_diameter: $(arg robot_diameter)
+            occupancy_threshold: 90
+        </rosparam>
+    </node>
+    <node pkg="rosbag" type="play" name="player" output="screen" args="-l $(dirname)/../../data/planning/map_dat.bag"/>
+
+    <include file="$(dirname)/aro_frontier_planning_rviz.launch" pass_all_args="true"/>
+</launch>

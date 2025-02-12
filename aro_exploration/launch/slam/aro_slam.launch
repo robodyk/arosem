@@ -1,0 +1,51 @@
+<launch>
+    <!-- Defaults for these 3 arguments are in config/slam.yaml and you can temporarily change them by passing these arguments to roslaunch. -->
+    <arg name="alignment" default="" doc="frame_to_frame, frame_to_map" />
+    <arg name="loss" default="" doc="point_to_point, point_to_plane" />
+    <arg name="absorient_domain" default="" doc="SE2, SE3" />
+    
+    <arg name="rviz" default="true"/>
+    <arg name="occupancy_map_frame" default="icp_map" />
+    <arg name="fixed_frame" default="icp_map" doc="Just for visualization" />
+    <arg name="record" default="false"/>
+    <arg name="debug_slam" default="false" doc="Show debugging prints in console" />
+
+    <node name="icp_slam" pkg="aro_exploration" type="icp_slam" output="screen">
+        <rosparam subst_value="true">
+            odom_frame: odom
+            map_frame: icp_map
+            max_age: 0.5
+            timeout: 0.5
+            always_publish_tf: false
+        </rosparam>
+        
+        <!-- Load the defaults for ICP SLAM and allow overriding some of them from roslaunch command line. -->
+        <rosparam command="load" file="$(dirname)/../../config/slam.yaml" />
+        <param name="alignment" value="$(arg alignment)" if="$(eval alignment!='')" />
+        <param name="loss" value="$(arg loss)" if="$(eval loss!='')" />
+        <param name="absorient_domain" value="$(arg absorient_domain)" if="$(eval absorient_domain!='')" />
+
+        <remap from="cloud" to="cloud/smooth"/>
+    </node>
+
+    <node if="$(arg debug_slam)" pkg="rosservice" type="rosservice" name="slam_set_log_level"
+          args="call --wait /icp_slam/set_logger_level 'rosout' 'debug'" />
+    
+    <include file="$(dirname)/cloud_filter.launch" pass_all_args="true"/>
+    <include file="$(dirname)/occupancy_mapper.launch" pass_all_args="true">
+        <arg name="map_frame" value="$(arg occupancy_map_frame)" />
+    </include>
+
+    <node name="visualize_icp_odom" pkg="cras_topic_tools" type="change_header">
+        <param name="frame_id" value="$(arg fixed_frame)" />
+        <remap from="~input" to="icp_odom" />
+        <remap from="~output" to="icp_odom_vis" />
+    </node>
+    
+    <include file="$(dirname)/tf_metrics.launch" pass_all_args="true">
+        <arg name="map_frame" value="icp_map" />
+    </include>
+    <include file="$(dirname)/record.launch" pass_all_args="true" if="$(arg record)" />
+
+    <include file="$(dirname)/aro_slam_rviz.launch" pass_all_args="true" if="$(arg rviz)" />
+</launch>

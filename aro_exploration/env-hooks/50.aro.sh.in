@@ -1,0 +1,4 @@
+export HOSTNAME
+export ROSCONSOLE_FORMAT='[${severity}] [${time}] [${node}]: ${message}'
+export ROSCONSOLE_STDOUT_LINE_BUFFERED="1"
+export GAZEBO_SUPPRESS_EOL_WARNING="1"

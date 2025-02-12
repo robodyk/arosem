@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<!--
+    Teleoperate the real robot using gamepad.
+    
+    Run this launch file on your computer and set ROS_MASTER_URI=http://turtleXX:11311 , changing XX to your robot number.
+-->
+
+<launch>
+    <group>
+        <remap from="cmd_vel" to="cmd_vel_mux/teleop_cmd_vel" />
+        <include file="$(find aro_sim)/launch/teleop_joy.launch" pass_all_args="true" />
+    </group>
+</launch>
+

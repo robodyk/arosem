@@ -1,0 +1,25 @@
+<launch>
+    <arg name="cloud" default="cloud/grid"/>
+    <arg name="occupancy" default="occupancy"/>
+    <arg name="camera_info" default="camera/rgb/camera_info"/>
+    <arg name="map_frame" default="map"/>
+    <arg name="occupancy_mapper_tf_timeout" default="0.25" />
+    
+    <node name="occupancy_mapper" pkg="aro_exploration" type="occupancy_mapper" output="log">
+        <rosparam subst_value="true">
+            sensor_frame: ''
+            map_frame: $(arg map_frame)
+            max_age: 0.5
+            timeout: $(arg occupancy_mapper_tf_timeout)
+            grid_res: 0.05
+            empty_update: -1.0
+            occupied_update: 1.0
+            min_occupancy: -5.0
+            max_occupancy: 20.0
+            occupied_threshold: 5.0
+        </rosparam>
+        <remap from="cloud" to="$(arg cloud)"/>
+        <remap from="occupancy" to="$(arg occupancy)"/>
+        <remap from="camera_info" to="$(arg camera_info)"/>
+    </node>
+</launch>

@@ -1,0 +1,439 @@
+#!/usr/bin/env python3
+from __future__ import absolute_import, division, print_function
+
+# Setup python paths first.
+import os
+import sys
+import rospy
+from nav_msgs.msg import OccupancyGrid
+from geometry_msgs.msg import TransformStamped
+import subprocess
+from threading import Timer
+import tf.transformations as tft
+import tf2_ros
+from aro_msgs.srv import PlanPath, PlanPathRequest, PlanPathResponse
+from timeit import default_timer as c_timer
+from geometry_msgs.msg import Pose2D, Pose, PoseStamped, Point, Quaternion
+from scipy.ndimage import morphology
+
+
+dir = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, os.path.join(dir, 'share'))
+
+print('Python version: %s' % sys.version)
+print('Python version info: %s' % (sys.version_info,))
+
+import base64
+from brute import Submission
+from glob import glob
+import matplotlib as mpl
+mpl.use('Agg')
+# mpl.rcParams['text.usetex'] = True
+# mpl.rcParams.update({"text.usetex": True,
+#                      "font.family": "sans-serif",
+#                      "font.sans-serif": ["Helvetica"]})
+import matplotlib.pyplot as plt
+import mimetypes
+import numpy as np
+from shutil import copytree
+
+np.set_printoptions(suppress=True)
+
+def run_command(cmd, cwd=None, env=None):
+    assert sys.version_info[0] in (2, 3)
+    if sys.version_info[0] == 2:
+        subprocess.check_call(cmd, cwd=cwd, env=env)
+    elif sys.version_info[0] == 3:
+        subprocess.run(cmd, check=True, cwd=cwd, env=env)
+
+
+def copy_shared_files(submission):
+    # assert not os.path.exists(os.path.join(submission.dir, 'share'))
+    if sys.version_info[0] == 3:
+        copytree('share', os.path.join(submission.dir, 'share'), dirs_exist_ok=True)
+    else:
+        copytree('share', os.path.join(submission.dir, 'share'))
+    for path in (glob(os.path.join(submission.dir, '*'))
+                 + glob(os.path.join(submission.dir, 'share', '*'))):
+        if os.path.basename(path)[0] in ('_', '.'):
+            continue
+        os.chmod(path, 0o777)
+
+
+def find_file(dir, name):
+    """Find file recursively inside directory."""
+    paths = []
+    for root, dirs, files in os.walk(dir):
+        for f in dirs + files:
+            if f == name:
+                paths.append(os.path.join(root, f))
+    return paths
+
+def format_outputs(outputs):
+    msg = ''
+    for out in outputs:
+        if out['stdout']:
+            msg += '<pre title="Standard output (stdout).">%s</pre>\n' % out['stdout']
+        if out['stderr']:
+            msg += '<pre title="Standard error output (stderr).">%s</pre>\n' % out['stderr']
+        if 'exception' in out and out['exception']:
+            msg += '<pre title="Raised exception.">%s</pre>\n' % out['exception']
+    return msg
+
+
+class Grid():
+    def __init__(self):
+        self.gridSubscriber = rospy.Subscriber('occupancy', OccupancyGrid, self.grid_cb)
+        self.robotDiameter = 0.5
+        self.gridReady = False
+
+    def shutdown(self):
+        self.gridSubscriber.unregister()
+
+    def grid_cb(self, msg):
+        width, height, self.resolution = msg.info.width, msg.info.height, msg.info.resolution
+        self.gridInfo = msg.info
+        self.grid = np.reshape(msg.data, (height, width))
+
+        if not self.gridReady:
+            # set robot size in grid and dilation footprint
+            self.dilateSize = np.ceil((self.robotDiameter / self.resolution) / 2).astype(int)
+            kernel_width = 2*self.dilateSize+1
+            kernel = np.zeros((kernel_width,kernel_width), dtype=bool)
+            y, x = np.ogrid[-self.dilateSize:self.dilateSize + 1, -self.dilateSize:self.dilateSize + 1]
+            mask = x ** 2 + y ** 2 <= self.dilateSize ** 2
+            kernel[mask] = 1
+            self.dilateFootprint = kernel
+            self.gridReady = True
+
+        obstacles = np.zeros(self.grid.shape, dtype=np.bool)
+        obstacles[np.where(self.grid != 0)] = 1
+        obstacles = morphology.grey_dilation(obstacles,footprint=self.dilateFootprint)
+        self.grid = obstacles
+
+
+    def mapToGridCoordinates(self, x, y):
+        pos = np.array([x - self.gridInfo.origin.position.x, y - self.gridInfo.origin.position.y, 0, 1])
+        quat = self.gridInfo.origin.orientation
+        mat = tft.quaternion_matrix(tft.quaternion_inverse([quat.x, quat.y, quat.z, quat.w]))
+        gridPos = (mat.dot(pos[np.newaxis].T).flatten()[:2]) / self.gridInfo.resolution
+        roundedPos = np.round(gridPos)
+        pos = roundedPos if np.allclose(gridPos, roundedPos) else np.floor(gridPos)
+        return pos
+
+    def is_pos_valid(self, x, y):
+        pos = self.mapToGridCoordinates(x,y)
+        try: 
+            val_at_pos = self.grid[int(pos[1])][int(pos[0])]
+        except Exception as e:
+            return False
+            
+        if val_at_pos != 0:
+            return False
+        else:
+            return True
+
+def main():
+
+    total = 0.0
+    messages = ''
+    output = []
+
+    if False:
+        total = 0.0
+        messages = '<p>Script not found.</p>'
+    else:
+        roscore_proc = subprocess.Popen(['roscore'])
+        rospy.init_node("tester")
+        rospy.set_param('robot_diameter', 0.6)
+        rospy.set_param('occupancy_treshold', 90)
+        rospy.set_param('map_frame', 'map')
+        player_proc = subprocess.Popen(['rosbag', 'play', 'occ_dat.bag'], cwd=os.path.dirname(os.path.abspath(__file__)))
+        # planner_ref_proc = subprocess.Popen(['roslaunch', 'aro_planning', 'planner.launch'])
+        grid = Grid()
+        kill = lambda process : process.terminate()
+
+        script_output_file = 'output.txt'
+        with open(script_output_file, 'w') as f_output:
+            # planner_proc = subprocess.Popen(['rosrun', 'aro_planning', 'planner.py'], stdout=f_output, stderr=f_output)
+            planner_proc = subprocess.Popen(['rosrun', 'aro_planning_test', 'planner.py'], stdout=f_output, stderr=f_output)
+
+        rospy.sleep(5)
+        timeout = 20
+        scan_timer = Timer(timeout, kill, [planner_proc])
+        serv_start = False
+
+        try:
+            scan_timer.start()
+            t = c_timer()
+            try:
+                rospy.wait_for_service('plan_path', 10)
+                plan_path = rospy.ServiceProxy('plan_path', PlanPath)
+                serv_start = True
+            except Exception as e: 
+                print('Exception caught') 
+                
+            if serv_start: 
+
+                rospy.sleep(1)
+                messages += '<p> Test 1: '
+                try:
+                    # -0.75,1 to 1.1,-0.8
+                    sx = -0.75
+                    sy = 1
+                    gx = 1.1
+                    gy = -0.8
+                    req = PlanPathRequest(Pose2D(sx,sy,0),Pose2D(gx,gy,0))
+                    path = plan_path(req).path
+
+                    if path and path[0]:
+                        total_len = 0
+                        man_len = np.abs(gx - sx) + np.abs(gy - sy)
+                        big_inc = False
+                        is_inval_pose = False
+                        for i in range(len(path)-1):
+                            increment = np.sqrt((path[i].x-path[i+1].x)**2 + ((path[i].y-path[i+1].y)**2))
+                            if not grid.is_pos_valid(path[i].x, path[i].y):
+                                is_inval_pose = True
+                            if increment > 0.3:
+                                big_inc = True
+                            total_len += increment
+                        if total_len < 0.5:
+                            messages += 'Path length from ['+str(sx)+', '+str(sy)+'] to ['+str(gx)+', '+str(gy)+'] length too short.'
+                        elif total_len >= man_len*2:
+                            messages += 'Path length from [' +str(sx)+ ', ' +str(sy)+ '] to [' +str(gx)+ ', ' +str(gy)+ '] length too long.'
+                        elif big_inc:
+                            messages += 'Path length from ['+str(sx)+', '+str(sy)+'] to ['+str(gx)+', '+str(gy)+'] not connected.'
+                        elif is_inval_pose:
+                            messages += 'Path from ['+str(sx)+', '+str(sy)+'] to ['+str(gx)+', '+str(gy)+'] contains invalid position.'
+                        else:
+                            messages += 'Path length from ['+str(sx)+', '+str(sy)+'] to ['+str(gx)+', '+str(gy)+'] is valid.'
+                            total += 1
+                    else:
+                        messages += 'Path format is invalid.</p>'
+
+                except Exception as e:
+                    rospy.loginfo('[EVALUATION] Exception caught: %s.', e)
+                    if (c_timer() - t) < timeout:
+                        messages += 'Exception caught during getting plan. Check script\'s output.</p>'
+                    else:
+                        messages += 'Internal timeout exceeded. PlanPath response time is too high.</p>'
+
+
+                # 1.1 -0.8
+                # -0.7 1.0
+                # -1.0 -0.9
+                # 0.9 1.8
+                rospy.sleep(1)
+                messages += '<p> Test 2: '
+                try:
+                    # -0.75,1 to 1.1,-0.8
+                    sx = 1.1
+                    sy = -0.8
+                    gx = 0.9
+                    gy = 1.8
+                    req = PlanPathRequest(Pose2D(sx,sy,0),Pose2D(gx,gy,0))
+                    path = plan_path(req).path
+
+                    if path and path[0]:
+                        total_len = 0
+                        man_len = np.abs(gx - sx) + np.abs(gy - sy)
+                        big_inc = False
+                        for i in range(len(path)-1):
+                            increment = np.sqrt((path[i].x-path[i+1].x)**2 + ((path[i].y-path[i+1].y)**2))
+                            if not grid.is_pos_valid(path[i].x, path[i].y):
+                                is_inval_pose = True
+                            if increment > 0.2:
+                                big_inc = True
+                            total_len += increment
+                        if total_len < 0.5:
+                            messages += 'Path length from ['+str(sx)+', '+str(sy)+'] to ['+str(gx)+', '+str(gy)+'] length too short.'
+                        elif total_len >= man_len*2:
+                            messages += 'Path length from [' +str(sx)+ ', ' +str(sy)+ '] to [' +str(gx)+ ', ' +str(gy)+ '] length too long.'
+                        elif big_inc:
+                            messages += 'Path length from ['+str(sx)+', '+str(sy)+'] to ['+str(gx)+', '+str(gy)+'] not connected.'
+                        elif is_inval_pose:
+                            messages += 'Path from [' + str(sx) + ', ' +str(sy)+ '] to [' +str(gx)+ ', ' +str(gy)+ '] contains invalid position.'
+                        else:
+                            messages += 'Path length from ['+str(sx)+', '+str(sy)+'] to ['+str(gx)+', '+str(gy)+'] is valid.'
+                            total += 1
+                    else:
+                        messages += 'Path format is invalid.</p>'
+
+                except Exception as e:
+                    rospy.loginfo('[EVALUATION] Exception caught: %s.', e)
+                    if (c_timer() - t) < timeout:
+                        messages += 'Exception caught during getting path. Check script\'s output.</p>'
+                    else:
+                        messages += 'Internal timeout exceeded. PlanPath service response time is too high.</p>'
+
+                rospy.sleep(1)
+                messages += '<p> Test 3: '
+                try:
+                    # -0.75,1 to 1.1,-0.8
+                    sx = 0.9
+                    sy = 1.8
+                    gx = -1.0
+                    gy = -0.9
+                    req = PlanPathRequest(Pose2D(sx,sy,0),Pose2D(gx,gy,0))
+                    path = plan_path(req).path
+
+                    if path and path[0]:
+                        total_len = 0
+                        man_len = np.abs(gx - sx) + np.abs(gy - sy)
+                        big_inc = False
+                        for i in range(len(path)-1):
+                            increment = np.sqrt((path[i].x-path[i+1].x)**2 + ((path[i].y-path[i+1].y)**2))
+                            if not grid.is_pos_valid(path[i].x, path[i].y):
+                                is_inval_pose = True
+                            if increment > 0.2:
+                                big_inc = True
+                            total_len += increment
+                        if total_len < 0.5:
+                            messages += 'Path length from ['+str(sx)+', '+str(sy)+'] to ['+str(gx)+', '+str(gy)+'] length too short.'
+                        elif total_len >= man_len*2:
+                            messages += 'Path length from [' +str(sx)+ ', ' +str(sy)+ '] to [' +str(gx)+ ', ' +str(gy)+ '] length too long.'
+                        elif big_inc:
+                            messages += 'Path length from ['+str(sx)+', '+str(sy)+'] to ['+str(gx)+', '+str(gy)+'] not connected.'
+                        elif is_inval_pose:
+                            messages += 'Path from [' +str(sx)+ ', ' +str(sy)+ '] to [' +str(gx)+ ', ' +str(gy)+ '] contains invalid position.'
+                        else:
+                            messages += 'Path length from ['+str(sx)+', '+str(sy)+'] to ['+str(gx)+', '+str(gy)+'] is valid.'
+                            total += 1
+                    else:
+                        messages += 'Path format is invalid.</p>'
+
+                except Exception as e:
+                    rospy.loginfo('[EVALUATION] Exception caught: %s.', e)
+                    if (c_timer() - t) < timeout:
+                        messages += 'Exception caught during getting path. Check script\'s output.</p>'
+                    else:
+                        messages += 'Internal timeout exceeded. PlanPath service response time is too high.</p>'
+
+                rospy.sleep(1)
+                messages += '<p> Test 4: '
+                try:
+                    # -0.75,1 to 1.1,-0.8
+                    sx = 1.1
+                    sy = -0.8
+                    gx = -1
+                    gy = -0.9
+                    req = PlanPathRequest(Pose2D(sx,sy,0),Pose2D(gx,gy,0))
+                    path = plan_path(req).path
+
+                    if path and path[0]:
+                        total_len = 0
+                        man_len = np.abs(gx - sx) + np.abs(gy - sy)
+                        big_inc = False
+                        for i in range(len(path)-1):
+                            increment = np.sqrt((path[i].x-path[i+1].x)**2 + ((path[i].y-path[i+1].y)**2))
+                            if not grid.is_pos_valid(path[i].x, path[i].y):
+                                is_inval_pose = True
+                            if increment > 0.2:
+                                big_inc = True
+                            total_len += increment
+                        if total_len < 0.5:
+                            messages += 'Path length from ['+str(sx)+', '+str(sy)+'] to ['+str(gx)+', '+str(gy)+'] length too short.'
+                        elif total_len >= man_len*2:
+                            messages += 'Path length from [' +str(sx)+ ', ' +str(sy)+ '] to [' +str(gx)+ ', ' +str(gy)+ '] length too long.'
+                        elif big_inc:
+                            messages += 'Path length from ['+str(sx)+', '+str(sy)+'] to ['+str(gx)+', '+str(gy)+'] not connected.'
+                        elif is_inval_pose:
+                            messages += 'Path from [' +str(sx)+ ', ' +str(sy)+ '] to [' +str(gx)+ ', ' +str(gy)+ '] contains invalid position.'
+                        else:
+                            messages += 'Path length from ['+str(sx)+', '+str(sy)+'] to ['+str(gx)+', '+str(gy)+'] is valid.'
+                            total += 1
+                    else:
+                        messages += 'Path format is invalid.</p>'
+
+                except Exception as e:
+                    rospy.loginfo('[EVALUATION] Exception caught: %s.', e)
+                    if (c_timer() - t) < timeout:
+                        messages += 'Exception caught during getting path. Check script\'s output.</p>'
+                    else:
+                        messages += 'Internal timeout exceeded. PlanPath service response time is too high.</p>'
+
+                rospy.sleep(1)
+                messages += '<p> Test 5: '
+                try:
+                    # -0.75,1 to 1.1,-0.8
+                    sx = -0.75
+                    sy = 1
+                    gx = 0.9
+                    gy = 1.8
+                    req = PlanPathRequest(Pose2D(sx,sy,0),Pose2D(gx,gy,0))
+                    path = plan_path(req).path
+
+                    if path and path[0]:
+                        total_len = 0
+                        man_len = np.abs(gx - sx) + np.abs(gy - sy)
+                        big_inc = False
+                        for i in range(len(path)-1):
+                            increment = np.sqrt((path[i].x-path[i+1].x)**2 + ((path[i].y-path[i+1].y)**2))
+                            if not grid.is_pos_valid(path[i].x, path[i].y):
+                                is_inval_pose = True
+                            if increment > 0.2:
+                                big_inc = True
+                            total_len += increment
+                        if total_len < 0.5:
+                            messages += 'Path length from ['+str(sx)+', '+str(sy)+'] to ['+str(gx)+', '+str(gy)+'] length too short.'
+                        elif total_len >= man_len*2:
+                            messages += 'Path length from [' +str(sx)+ ', ' +str(sy)+ '] to [' +str(gx)+ ', ' +str(gy)+ '] length too long.'
+                        elif big_inc:
+                            messages += 'Path length from ['+str(sx)+', '+str(sy)+'] to ['+str(gx)+', '+str(gy)+'] not connected.'
+                        elif is_inval_pose:
+                            messages += 'Path from [' +str(sx)+ ', ' +str(sy)+ '] to [' +str(gx)+ ', ' +str(gy)+ '] contains invalid position.'
+                        else:
+                            messages += 'Path length from ['+str(sx)+', '+str(sy)+'] to ['+str(gx)+', '+str(gy)+'] is valid.'
+                            total += 1
+                    else:
+                        messages += 'Path format is invalid.</p>'
+
+                except Exception as e:
+                    rospy.loginfo('[EVALUATION] Exception caught: %s.', e)
+                    if (c_timer() - t) < timeout:
+                        messages += 'Exception caught during getting path. Check script\'s output.</p>'
+                    else:
+                        messages += 'Internal timeout exceeded. PlanPath service response time is too high.</p>'
+
+
+        finally:
+            planner_proc.terminate()
+            scan_timer.cancel()
+
+        if not serv_start:
+            messages += "<p>Timeout while waiting for service to start.</p>"
+            total = 0.0
+        
+        rospy.sleep(1)
+
+        messages += '<p>'
+        if os.path.getsize(script_output_file) / (1024.0**2) > 1:
+            rospy.loginfo('[EVALUATION] Student\'s output larger than 1 MB.')
+            messages += '<p>Student\'s script output ommited, size if output file is larger than 1 MB. Do not debug through Brute.'
+        else:
+            output = ''
+            with open(script_output_file, 'r') as f:
+                output = f.readlines()
+                rospy.loginfo('[EVALUATION] Student\'s output lodaded.')
+
+            messages += '<p>Student\'s script output:'
+            if output:
+                messages += '<p>'
+                for line in output: 
+                    messages += '<br>' + line + '</br>' 
+
+        messages += '</p>'
+
+        grid.shutdown()
+        grid = []
+        player_proc.kill()
+        roscore_proc.kill()
+
+
+    students = Submission.from_env()
+    students.write_results_score(total)
+    students.write_results_html(messages)
+
+if __name__ == '__main__':
+    main()
