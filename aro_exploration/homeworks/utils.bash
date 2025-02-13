@@ -14,12 +14,14 @@ function create_hw_package {
 	hw="$1"
   if [[ "$hw" == "sw01" ]]; then
     destfile="${dir}/sw01.tar.gz"
+    hwhw="sw01"
   else
     destfile="${dir}/hw${hw}.tar.gz"
+    hwhw="hw${hw}"
   fi
   
   echo "Creating submission archive for ARO homework ${hw}:"
-  (cd "$dir/../.." && tar -cvf "$destfile" -T "${dir}/hw${hw}.files")
+  (cd "$dir/../.." && tar -cvf "$destfile" -T "${dir}/${hwhw}.files")
   echo "Archive created at ${destfile} ."
   echo "Submit it to Brute at ${ARO_BRUTE_SUBMISSION_URL} (don't forget to choose correct homework)."
   
