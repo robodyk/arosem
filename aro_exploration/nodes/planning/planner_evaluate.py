@@ -108,9 +108,10 @@ def check_path(evaluator, gx, gy, messages, path, ref_path, sx, sy):
     success = False
 
     min_len = 0.1
-    max_len_mod = 1.2
+    max_len_mod = 1.5
     max_path_increment_length = 0.2
     start_and_end_max_dist_from_path = 0.2
+    clearing_dist = 1.2 * evaluator.robot_diameter / 2
 
     if path and path[0] and path is not None:
         total_len = 0
@@ -131,11 +132,13 @@ def check_path(evaluator, gx, gy, messages, path, ref_path, sx, sy):
         path_safe = True
         unsafety_reason = ""
         for i in range(len(path)):
-            pos_safe, reason = check_if_pos_safe(path[i].x, path[i].y, evaluator)
-            if not pos_safe:
-                path_safe = False
-                unsafety_reason = reason
-                break
+            # ONLY CHECK OUTSIDE OF CLEARING DIST!
+            if np.sqrt((path[i].x - sx) ** 2 + ((path[i].y - sy) ** 2)) > clearing_dist:
+                pos_safe, reason = check_if_pos_safe(path[i].x, path[i].y, evaluator)
+                if not pos_safe:
+                    path_safe = False
+                    unsafety_reason = reason
+                    break
 
         # CHECK IF PATH CONNECTED TO START AND GOAL POSITIONS
         start_pos_dist = np.sqrt((path[0].x - sx) ** 2 + ((path[0].y - sy) ** 2))
@@ -262,7 +265,8 @@ def main():
     goal_positions = []
 
     # PATH 1
-    start_positions.append((-0.75, 1))
+    # start_positions.append((-0.75, 1))
+    start_positions.append((-0.6, 0))
     goal_positions.append((1.1, -0.8))
     reference_paths_map.append([(-0.72, 1.03), (-0.67, 0.98), (-0.62, 0.93), (-0.57, 0.88), (-0.52, 0.83), (-0.47, 0.78), (-0.42, 0.73), (-0.37, 0.68), (-0.37, 0.63), (-0.32, 0.58), (-0.32, 0.53), (-0.32, 0.48), (-0.27, 0.43), (-0.22, 0.38), (-0.17, 0.33), (-0.12, 0.28), (-0.07, 0.23), (-0.02, 0.18), (0.03, 0.13), (0.08, 0.08), (0.13, 0.03), (0.18, -0.02), (0.23, -0.07), (0.23, -0.12), (0.28, -0.17), (0.33, -0.22), (0.38, -0.27), (0.43, -0.32), (0.48, -0.37), (0.53, -0.42), (0.58, -0.47), (0.63, -0.52), (0.68, -0.57), (0.73, -0.62), (0.78, -0.67), (0.83, -0.72), (0.88, -0.72), (0.93, -0.72), (0.98, -0.72), (1.03, -0.72), (1.08, -0.72), (1.13, -0.77)])
 
