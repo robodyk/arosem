@@ -1,0 +1,12 @@
+<launch>
+    <arg name="ma_x" default="-5.70" />
+    <arg name="ma_y" default="4.17" />
+    <arg name="ma_yaw" default="0.0" />
+    
+    <arg name="mr_x" default="1.30" />
+    <arg name="mr_y" default="1.41" />
+    <arg name="mr_yaw" default="-0.802889327" />
+
+    <arg name="include" default="$(find aro_sim)/launch/sim_with_markers.launch" />
+    <include file="$(arg include)" pass_all_args="true" />
+</launch>
