@@ -218,6 +218,7 @@ class Evaluathor():
                           "world:={}".format(self.mapName),
                           "marker_config:={}".format(self.requestedMarker),
                           "ground_truth:=true",
+                          "mr_use_gt:=false",
                           "rviz:=" + ("true" if self.rviz else "false"),
                           "gui:=" + ("true" if self.gui else "false"),
                           "localization_visualize:=" + ("true" if self.localization_visualize else "false"),
@@ -232,7 +233,7 @@ class Evaluathor():
         launch_files = [(sim_launch_file, sim_launch_args)]
         self.sim_launch = roslaunch.parent.ROSLaunchParent(uuid, launch_files)
         rospy.loginfo(self.sim_launch.roslaunch_files)
-        self.sim_launch.force_log = True
+        # self.sim_launch.force_log = True
         self.sim_launch.start()
         rospy.loginfo("ARO SIM launched.")
 
