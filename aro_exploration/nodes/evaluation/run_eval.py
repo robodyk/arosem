@@ -37,7 +37,6 @@ class Evaluathor():
 
         self.requestedMap = rospy.get_param("~map_name", "aro_eval_1")  # name of the requested world
         self.requestedMarker = rospy.get_param("~marker_config", 1)
-        self.spawnMode = rospy.get_param("~spawn_mode", "fixed")  # random starting position
         self.runMode = rospy.get_param("~run_mode", self.RUN_MANUAL)  # if run o multiple maps, how are the maps being switched
         self.timeLimit = rospy.get_param("~time_limit", 120)  # go to next map after X seconds if run mode is auto
         self.localization_visualize = rospy.get_param("~localization_visualize", False)
@@ -69,33 +68,6 @@ class Evaluathor():
 
         self.marker_score_pub = rospy.Publisher('/marker_score', Float32, queue_size=1)
         self.marker_error_pub = rospy.Publisher('/marker_error', Float32, queue_size=1)
-
-        # rospy.loginfo("Setting up evaluation:\n\t{} map mode\n\tmap(s): {}\n\t{} run mode\n\t{} spawn mode".format(
-        #     "multi" if self.multiEval else "single",
-        #     self.requestedMap,
-        #     self.runMode,
-        #     self.spawnMode
-        # ))
-
-    def __formatTime(self, secs):
-        """Splits the time in seconds into hours, minutes, and seconds
-
-        Arguments:
-            secs {int} -- time in seconds
-
-        Returns:
-            tuple
-        """
-        h = int(secs / 3600)
-        r = secs - h * 3600
-        m = int(r / 60)
-        r -= m * 60
-        return h, m, int(r)
-
-    def __generateRandomSpawn(self):
-        """ Generates random x & y position for the robot.
-        """
-        return np.random.randn(2) / 2
 
     def markerUpdate_cb(self, msg):
         self.publishedMarkerPose = msg.pose
@@ -210,8 +182,6 @@ class Evaluathor():
         self.__loadMarker(self.requestedMap)
         self.startingPose = [0,0]
 
-        spawn_command = []
-
         # Launch the simulator
         uuid = roslaunch.rlutil.get_or_generate_uuid(None, False)
         roslaunch.configure_logging(uuid)
@@ -226,7 +196,6 @@ class Evaluathor():
                           "localization_visualize:=" + ("true" if self.localization_visualize else "false"),
                           "run_mode:=eval"
                           ]
-        launch_command += spawn_command
 
         sim_launch_file = os.path.join(self.aro_exp_pkg, "launch","exploration","aro_exploration_sim.launch")
         sim_launch_args = launch_command[2:]
