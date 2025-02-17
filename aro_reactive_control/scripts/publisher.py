@@ -3,6 +3,7 @@ import rospy
 from std_msgs.msg import String
 
 def msg_publisher():
+
     rospy.init_node('msg_publisher', anonymous=True)
 
     rospy.loginfo('Initializing message publisher.')
@@ -15,7 +16,7 @@ def msg_publisher():
     rospy.loginfo('Node initialized. Starting message publishing.')
 
     while not rospy.is_shutdown():
-        pub.publish("hello {}".format(counter))
+        pub.publish("hello #{0:d}".format(counter))
         counter = counter + 1
         rate.sleep()
 

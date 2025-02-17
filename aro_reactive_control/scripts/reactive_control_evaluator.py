@@ -14,8 +14,9 @@ from aro_msgs.msg import SectorDistances
 class ReactiveControllerEvaluator():
 
     def __init__(self):
-        rospy.loginfo('Initializing node')
+
         rospy.init_node('reactive_controller_evaluator')
+        rospy.loginfo('Initializing reactive controller evaluator node.')
 
         self.initialized = False
         self.activated = False
@@ -343,7 +344,7 @@ class ReactiveControllerEvaluator():
 
         :return: ROS service response 
         """
-        rospy.loginfo_once('Mission evaluation callback entered')
+        rospy.loginfo_once('Mission evaluation callback entered.')
 
         msg = ""
         if self.mission_evaluation_required: 
