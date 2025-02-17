@@ -632,7 +632,7 @@
       <static>1</static>
     </model>
     <model name='unit_box'>
-      <pose>0 5 0.5 0 -0 0</pose>
+      <pose>-1.92 5.7 0.5 0 -0 0</pose>
       <link name='link'>
         <inertial>
           <mass>1</mass>

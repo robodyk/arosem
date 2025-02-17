@@ -4,7 +4,7 @@
     <arg name="ma_yaw" default="0" />
     
     <arg name="mr_x" default="0" />
-    <arg name="mr_y" default="4.49" />
+    <arg name="mr_y" default="7.32" />
     <arg name="mr_yaw" default="-1.5708" />
 
     <arg name="include" default="$(find aro_sim)/launch/sim_with_markers.launch" />
