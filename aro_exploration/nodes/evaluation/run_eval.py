@@ -106,6 +106,8 @@ class Evaluathor():
             new_pose = np.array([msg.pose.pose.position.x, msg.pose.pose.position.y])
             dist = np.linalg.norm(new_pose - prev_pose)
             self.distanceDriven += dist
+        else:
+            self.startingPose = [msg.pose.pose.position.x, msg.pose.pose.position.y]
         self.gt_odom = msg.pose.pose
         if self.startTime is None:
             self.startTime = rospy.Time.now()
@@ -225,8 +227,6 @@ class Evaluathor():
                           "run_mode:=eval"
                           ]
         launch_command += spawn_command
-
-        print("Starting at pose: x={:.4f} y={:.4f}".format(*self.startingPose))
 
         sim_launch_file = os.path.join(self.aro_exp_pkg, "launch","exploration","aro_exploration_sim.launch")
         sim_launch_args = launch_command[2:]
