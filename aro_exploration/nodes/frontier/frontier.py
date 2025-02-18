@@ -2,7 +2,7 @@
 
 import numpy as np
 import rospy
-from scipy.ndimage import morphology
+from scipy.ndimage import grey_dilation
 from nav_msgs.msg import OccupancyGrid, MapMetaData
 from visualization_msgs.msg import Marker, MarkerArray
 from geometry_msgs.msg import Pose2D
