@@ -5,7 +5,7 @@ import rospy
 import numpy as np
 from queue import PriorityQueue
 from typing import List
-from scipy.ndimage import morphology
+from scipy.ndimage import grey_dilation
 from nav_msgs.msg import OccupancyGrid, MapMetaData, Path
 from geometry_msgs.msg import Pose2D, Pose, PoseStamped, Point, Quaternion
 from visualization_msgs.msg import MarkerArray, Marker
@@ -95,7 +95,7 @@ class PathPlanner:
 
         # TODO: Make sure you take into account unknown grid tiles as non-traversable and also inflate those.
 
-        # TODO: Compute the path using A* and euclidean distance. You can move diagonally, but check the safety of the 4 cells 
+        # TODO: Compute the path using A* and a euclidean distance heuristic. You can move diagonally, but check the safety of the 4 cells 
 
         # TODO: Grid tiles could and should be explored repeatedly with updated cost.
 
