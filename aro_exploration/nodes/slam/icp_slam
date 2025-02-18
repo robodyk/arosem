@@ -2,7 +2,7 @@
 """
 Simultaneous localization and mapping (SLAM) based on Iterative Closest Point (ICP). Localization is achieved by
 aligning input point clouds to a reference, which can be either a previous input point cloud (a key frame) or an
-incrementally built map from registered point clouds.
+incrementally built map from aligned point clouds.
 """
 
 from typing import Optional, Tuple
@@ -118,7 +118,7 @@ class IcpSlam:
         """Timestamp of the previous odom->map transform."""
 
         self.markers_pub = rospy.Publisher('~markers', MarkerArray, queue_size=5)
-        self.registered_cloud_pub = rospy.Publisher('registered', PointCloud2, queue_size=5)
+        self.aligned_cloud_pub = rospy.Publisher('aligned', PointCloud2, queue_size=5)
         self.inliers_cloud_pub = rospy.Publisher('inliers', PointCloud2, queue_size=5)
 
         self.map_pub = rospy.Publisher('map', PointCloud2, queue_size=5, latch=True)
@@ -135,7 +135,7 @@ class IcpSlam:
             marker = Marker()
             marker.header.frame_id = self.map_frame
             marker.header.stamp = stamp
-            marker.ns = 'inliers/registered'
+            marker.ns = 'inliers/aligned'
             marker.id = 0
             marker.type = Marker.POINTS
             marker.action = Marker.MODIFY
@@ -179,7 +179,7 @@ class IcpSlam:
             marker = Marker()
             marker.header.frame_id = self.map_frame
             marker.header.stamp = stamp
-            marker.ns = 'outliers/registered'
+            marker.ns = 'outliers/aligned'
             marker.id = 0
             marker.type = Marker.POINTS
             marker.action = Marker.MODIFY
@@ -226,15 +226,15 @@ class IcpSlam:
         return localized, res
 
     # @timing
-    def update_map(self, p_registered_struct: np.ndarray, msg: PointCloud2) -> None:
+    def update_map(self, p_aligned_struct: np.ndarray, msg: PointCloud2) -> None:
         """Update the map and publish it.
 
-        :param p_registered_struct: The new point cloud aligned to the map. Structured Numpy array.
+        :param p_aligned_struct: The new point cloud aligned to the map. Structured Numpy array.
         :param msg: The new point cloud message (only header is used from it).
         """
         t = timer()
         map_struct, map_index, n_keep = update_map(
-            self.map_struct, self.map_index, p_registered_struct, self.mapping_min_dist, self.alignment)
+            self.map_struct, self.map_index, p_aligned_struct, self.mapping_min_dist, self.alignment)
 
         if n_keep > 0:
             self.map_struct = map_struct
@@ -324,17 +324,17 @@ class IcpSlam:
         self.prev_base_to_map = numpify(base_to_map.transform)
         self.odom_pub.publish(odom)
 
-        p_registered = transform(self.odom_to_map, p_struct)
-        msg_registered = msgify(PointCloud2, p_registered)
-        msg_registered.header = msg.header
-        msg_registered.header.frame_id = self.map_frame
-        self.registered_cloud_pub.publish(msg_registered)
+        p_aligned = transform(self.odom_to_map, p_struct)
+        msg_aligned = msgify(PointCloud2, p_aligned)
+        msg_aligned.header = msg.header
+        msg_aligned.header.frame_id = self.map_frame
+        self.aligned_cloud_pub.publish(msg_aligned)
 
         if self.map_struct is None or (localized and res.inliers.mean() < self.mapping_inlier_ratio):
-            self.update_map(p_registered, msg_registered)
+            self.update_map(p_aligned, msg_aligned)
 
         if res.inliers is not None:
-            self.publish_markers(msg.header.stamp, position(p_registered), res.inliers, res.q_inliers)
+            self.publish_markers(msg.header.stamp, position(p_aligned), res.inliers, res.q_inliers)
 
 
 def main():
