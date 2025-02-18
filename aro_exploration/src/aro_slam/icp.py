@@ -43,12 +43,14 @@ try:
     loginfo = rospy.loginfo
     logwarn = rospy.logwarn
     logerr = rospy.logerr
+    has_rospy = True
 except ImportError:
     import sys
     def logdebug(*args, **kwargs): pass
     loginfo = print
     def logwarn(*args, **kwargs): print(*args, **kwargs, file=sys.stderr)
     def logerr(*args, **kwargs): print(*args, **kwargs, file=sys.stderr)
+    has_rospy = False
 
 from aro_slam.clouds import e2p, normal, p2e, position, transform, DType
 
@@ -164,10 +166,10 @@ def absolute_orientation(p: np.ndarray, q: np.ndarray, domain=AbsorientDomain.SE
 
 @dataclass
 class IcpResult:
-    """ICP registration result."""
+    """ICP alignment result."""
 
     T: Optional[np.ndarray] = None
-    """The aligning transform (Numpy array 4x4) or None if registration failed."""
+    """The aligning transform (Numpy array 4x4) or None if alignment failed."""
     num_iters: Optional[int] = None
     """Number of iterations run."""
     correspondences: Optional[Sequence[int]] = None
@@ -355,34 +357,34 @@ def icp(p_struct: np.ndarray, q_struct: np.ndarray, q_index: Optional[cKDTree] =
                      mean_inlier_dist=inl_errs[-1] if inl_errs else float('nan'), cov=cov)
 
 
-def update_map(q_struct: Optional[np.ndarray], q_index: cKDTree, p_struct_registered: np.ndarray, min_dist: float,
+def update_map(q_struct: Optional[np.ndarray], q_index: cKDTree, p_struct_aligned: np.ndarray, min_dist: float,
                alignment: Alignment = Alignment.frame_to_frame) \
         -> Tuple[np.ndarray, cKDTree, int]:
-    """Update the scan/map q according to the given update rule with new points from p_struct_registered.
+    """Update the scan/map q according to the given update rule with new points from p_struct_aligned.
 
     :param q_struct: Structured Numpy array with the last scan/current map q (may be None in the beginning).
                      Numpy array 3xN.
     :param q_index: KD-Tree index of the last scan/current map.
-    :param p_struct_registered: The incoming cloud p aligned to the map frame.
+    :param p_struct_aligned: The incoming cloud p aligned to the map frame.
     :param min_dist: Minimum distance between p points and their nearest neighbors to consider them new map points.
     :param alignment: Whether to align only to previous scan (frame_to_frame) or to current map (frame_to_map).
 
     :return New map, its KD-tree index and number of newly added points.
     """
     if q_struct is None or alignment == Alignment.frame_to_frame:
-        q_struct = p_struct_registered
-        num_new_points = np.ones(q_struct.shape, dtype=bool).sum()
+        new_q_struct = p_struct_aligned
+        num_new_points = np.ones(new_q_struct.shape, dtype=bool).sum()
     else:  # frame_to_map alignment with already existing map
         # TODO HW 3: Implement map update.
-        # Look at the registered points from p_struct_registered and concatenate them to the old map q_struct such that
+        # Look at the aligned points from p_struct_aligned and concatenate them to the old map q_struct such that
         # new points are not close to any old map point.
-        p = position(p_struct_registered)
-        q_struct = p_struct_registered  # FIXME q_struct should be the concatenation of new points and old map
+        p = position(p_struct_aligned)
+        new_q_struct = p_struct_aligned  # FIXME new_q_struct should be the concatenation of new points and old map
         num_new_points = np.ones(q_struct.shape, dtype=bool).sum()  # FIXME this should be the number of added points
 
 
-    q_index = cKDTree(position(q_struct))
-    return q_struct, q_index, num_new_points
+    new_q_index = cKDTree(position(new_q_struct))
+    return new_q_struct, new_q_index, num_new_points
 
 
 # TESTS #######################################################################
@@ -593,9 +595,20 @@ class TestUpdateMap(unittest.TestCase):
         x = y_str[:2]
         res = update_map(x, cKDTree(as_unstructured(x)), y_str[2:], 1.0, alignment=Alignment.frame_to_frame)
         new_map, _, num_new = res
-        self.assertEquals(2, num_new)
-        self.assertEquals((2,), new_map.shape)
+        self.assertEqual(2, num_new)
+        self.assertEqual((2,), new_map.shape)
         self.assertTrue(np.allclose(as_unstructured(y_str[2:]), as_unstructured(new_map)))
+
+    def test_frame_to_frame_none(self):
+        y = np.array([[0, 1,  0, -1],
+                      [1, 0, -1,  0],
+                      [0, 0,  0,  0]], dtype=np.float32)
+        y_str = unstructured_to_structured(y.T, dtype=DType.position.value)
+        res = update_map(None, None, y_str, 1.0, alignment=Alignment.frame_to_frame)
+        new_map, _, num_new = res
+        self.assertEqual(4, num_new)
+        self.assertEqual((4,), new_map.shape)
+        self.assertTrue(np.allclose(as_unstructured(y_str), as_unstructured(new_map)))
 
     def test_frame_to_map(self):
         y = np.array([[0, 1,  0, -1],
@@ -605,8 +618,21 @@ class TestUpdateMap(unittest.TestCase):
         x = y_str[:2]
         res = update_map(x, cKDTree(as_unstructured(x)), y_str[2:], 1.0, alignment=Alignment.frame_to_map)
         new_map, _, num_new = res
-        self.assertEquals(2, num_new)
-        self.assertEquals((4,), new_map.shape)
+        self.assertEqual(2, num_new)
+        self.assertEqual((4,), new_map.shape)
+        y_sorted = np.array(sorted(y.T.tolist()))
+        new_sorted = np.array(sorted(as_unstructured(new_map).tolist()))
+        self.assertTrue(np.allclose(y_sorted, new_sorted))
+
+    def test_frame_to_map_none(self):
+        y = np.array([[0, 1,  0, -1],
+                      [1, 0, -1,  0],
+                      [0, 0,  0,  0]], dtype=np.float32)
+        y_str = unstructured_to_structured(y.T, dtype=DType.position.value)
+        res = update_map(None, None, y_str, 1.0, alignment=Alignment.frame_to_map)
+        new_map, _, num_new = res
+        self.assertEqual(4, num_new)
+        self.assertEqual((4,), new_map.shape)
         y_sorted = np.array(sorted(y.T.tolist()))
         new_sorted = np.array(sorted(as_unstructured(new_map).tolist()))
         self.assertTrue(np.allclose(y_sorted, new_sorted))
@@ -641,8 +667,11 @@ def absorient_demo():
     # Move the data
     moved_data = R_true.dot(true_data) + t_true
 
+    seed = 42  # You can change this to get a different noise and a different choice of inliers
+    random = np.random.RandomState(seed)
+
     # Add noise
-    n = 0.5 * (np.random.random((3, num_points)) - 0.5)  # noise
+    n = 0.5 * (random.random((3, num_points)) - 0.5)  # noise
     moved_data = moved_data + n
 
     # Assign to variables we use in formulas.
@@ -655,7 +684,7 @@ def absorient_demo():
     # choose inliers for alignment
     n_inl = num_points
     # n_inl = 2
-    inl_mask = np.random.choice(range(num_points), n_inl, replace=False)
+    inl_mask = random.choice(range(num_points), n_inl, replace=False)
     P_inl = P[:, inl_mask]
     Q_inl = Q[:, inl_mask]
 
@@ -756,5 +785,7 @@ def icp_demo():
 
 if __name__ == '__main__':
     # main()
+    if has_rospy:
+        rospy.core.configure_logging("icp")
     absorient_demo()
     icp_demo()

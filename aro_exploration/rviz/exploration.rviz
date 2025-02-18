@@ -576,14 +576,14 @@ Visualization Manager:
       Invert Rainbow: false
       Max Color: 255; 255; 255
       Min Color: 0; 0; 0
-      Name: Registered Points
+      Name: Aligned Points
       Position Transformer: XYZ
       Queue Size: 1
       Selectable: false
       Size (Pixels): 5
       Size (m): 0.009999999776482582
       Style: Points
-      Topic: /registered
+      Topic: /aligned
       Unreliable: false
       Use Fixed Frame: true
       Use rainbow: true
@@ -595,11 +595,11 @@ Visualization Manager:
       Enabled: false
       Max Color: 255; 0; 0
       MinColor: 0; 255; 0
-      Name: Registered Normals
+      Name: Aligned Normals
       Queue Size: 10
       Scale: 0.10000000149011612
       Style: DirectionColor
-      Topic: /registered
+      Topic: /aligned
       Unreliable: false
       Use Rainbow: true
       Value: false
