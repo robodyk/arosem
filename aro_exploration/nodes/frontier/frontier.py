@@ -87,14 +87,16 @@ class FrontierExplorer:
             return
         robot_grid_pos = self.robot_grid_position
         
-        # get a binary mask, corresponding to the robot, which will be used for inflating obstacles and unknown space
+        # get the kernel - a binary mask, corresponding to the robot shape (or larger for more safety), which will be used for inflating obstacles and unknown space
         dilation_footprint = get_circular_dilation_footprint(self.robot_diameter, self.grid_resolution)
 
-        # TODO: Copy the occupancy grid into some temporary variable(s) and inflate the obstacles and unknown spaces using 'morphology.grey_dilation()'
+        # TODO: Copy the occupancy grid into some temporary variable(s) and inflate the obstacles and unknown spaces using 'grey_dilation()'
 
         # TODO: Careful, unknown space might also be an obstacle, and obstacles have priority! Merge inflated grids of occupied and unknown tiles afterwards in right order.
 
         # TODO: Run the Wavefront Frontier Detection algorithm on the modified occupancy grid - see the presentation slides for details on how to implement it
+
+        # TODO: Also treat the cells in the dilation_footprint centered on the starting position as traversable while doing the BFS to avoid finding 0 frontiers when the robot ends up close to obstacles (see courseware for more info on this)
         
         # TODO: At the end, self.frontiers should contain a list of Frontier objects for all the frontiers you find using the WFD algorithm
 

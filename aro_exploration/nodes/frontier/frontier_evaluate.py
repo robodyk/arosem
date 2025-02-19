@@ -129,7 +129,8 @@ if __name__ == '__main__':
                     (-0.3, -1.0, -1.05, -0.9),
                     (-0.2, -1.7, -0.65, -1.95),
                     (0.6, 1.7, 0.45, 1.75),
-                    (1.5, -2.0, 1.9, -1.95)
+                    # (1.5, -2.0, 1.9, -1.95)
+                    (-0.6, 0.3, -0.775, 1.025) # this example has starting position near obstacle
                 ]
 
                 for i, (px, py, fx, fy) in enumerate(test_positions, start=1):
