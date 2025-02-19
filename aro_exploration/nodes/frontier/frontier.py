@@ -79,6 +79,7 @@ class FrontierExplorer:
         """ Find and store frontiers by running Wavefront Frontier Detection on an inflated grid """
         rospy.loginfo('Finding frontiers')
         self.frontiers = [] # clear any previously computed frontiers
+        self.clear_grid_cells_visualization() # reset grid cells visualization for all namespaces
 
         # update the robot's position on the grid based on current map and transforms
         self.update_robot_grid_coordinates()
@@ -191,6 +192,14 @@ class FrontierExplorer:
 
     def vis_grid_cb(self, msg):
         self.extract_vis_grid(msg)
+
+    def clear_grid_cells_visualization(self):
+        marker_array = MarkerArray()
+        marker = Marker()
+        marker.header.frame_id = self.map_frame
+        marker.action = marker.DELETEALL
+        marker_array.markers.append(marker)
+        self.vis_pub.publish(marker_array)
 
     def publish_grid_cells_vis(self, grid_positions, clr, rviz_namespace = "default", z_pos = 0 ):
         """ Visualize given cells of the grid """
