@@ -227,6 +227,9 @@ class PlanningEvaluator():
 
 def main():
 
+    endsleeptime = 5
+    sleepbetweentrials = 1
+
     total = 0.0
     messages = ''
     output = []
@@ -247,8 +250,6 @@ def main():
     planner_script_output_file = 'planner_output.txt'
     with open(planner_script_output_file, 'w') as f_output:
         planner_proc = subprocess.Popen(['rosrun', 'aro_exploration', 'planner.py'], stdout=f_output, stderr=f_output)
-
-    rospy.loginfo("Your node's console output will be written to " + planner_script_output_file + " in your current directory.")
 
     rospy.sleep(5)
     timeout = 30
@@ -306,7 +307,7 @@ def main():
 
         num_successful_evals = 0
         for test_path_index in range(len(start_positions)):
-            rospy.sleep(1)
+            rospy.sleep(sleepbetweentrials)
             rospy.loginfo('Test ' + str(test_path_index + 1) + ':')
             try:
                 sx = start_positions[test_path_index][0]
@@ -336,17 +337,24 @@ def main():
             except Exception as e:
                 rospy.loginfo('[EVALUATION] Exception caught: %s.', e)
 
-            # rospy.sleep(1)
-            # messages += '<p> Test 2: '
-
         rospy.loginfo("[EVALUATION] Total evaluation success rate: %.2f / %.2f", num_successful_evals, len(start_positions)) 
+        # rospy.sleep(60)
 
+    rospy.loginfo("[EVALUATION] Your node's console output has been written to " + planner_script_output_file + " in your current directory.")
+    rospy.loginfo("[EVALUATION] Waiting for %.2f seconds and exiting", endsleeptime) 
+    rospy.loginfo("[EVALUATION] You can change the sleep time between trials and at the end in this script") 
+    rospy.sleep(endsleeptime)
+
+    scan_timer1.cancel()
+    scan_timer2.cancel()
+    scan_timer3.cancel()
         
     planner_proc.terminate()
-    rospy.sleep(1)
+    # rospy.sleep(3)
     evaluator.shutdown()
-    player_proc.kill()
-    roscore_proc.kill()
+    player_proc.terminate()
+    rviz_proc.terminate()
+    roscore_proc.terminate()
     
 
 if __name__ == '__main__':

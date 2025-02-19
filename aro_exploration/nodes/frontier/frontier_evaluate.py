@@ -77,6 +77,8 @@ if __name__ == '__main__':
     messages = ''
     max_dist = 0.3 # Acceptable imprecision.
     output = []
+    endsleeptime = 5
+    sleepbetweentrials = 1
 
     if not os.path.isfile(os.path.join(dir,'frontier.py')):
         rospy.loginfo('Frontier script not found.')
@@ -94,7 +96,7 @@ if __name__ == '__main__':
 
         kill = lambda process : process.terminate()
 
-        script_output_file = 'output.txt'
+        script_output_file = 'frontier_output.txt'
         with open(script_output_file, 'w') as f_output:
             frontier_proc = subprocess.Popen(['rosrun', 'aro_exploration', 'frontier.py'], stdout=f_output, stderr=f_output)
 
@@ -121,6 +123,7 @@ if __name__ == '__main__':
                 rospy.loginfo(f'[EVALUATION] Exception caught: {e}.') 
 
             if serv_start:
+                score = 0
                 test_positions = [
                     (-0.3, 0.7, -0.8, 1.0),
                     (-0.3, -1.0, -1.05, -0.9),
@@ -131,7 +134,7 @@ if __name__ == '__main__':
 
                 for i, (px, py, fx, fy) in enumerate(test_positions, start=1):
                     frontier.set_pos(px, py)
-                    rospy.sleep(1)
+                    rospy.sleep(sleepbetweentrials)
                     rospy.loginfo(f'Test {i}:')
                     try:
                         coords = get_frontier()
@@ -142,6 +145,7 @@ if __name__ == '__main__':
                                     rospy.loginfo(f'Incorrect solution - Frontier center [{x}, {y}] received when robot is at [{px}, {py}] is too far from reference solution [{fx}, {fy}]')
                                 else:
                                     rospy.loginfo(f'SUCCESS! Frontier center [{x}, {y}] received when robot is at [{px}, {py}] is sufficiently close to reference solution [{fx}, {fy}]')
+                                    score += 1
                             else:
                                 rospy.logwarn(f'Incorrect solution - received frontier center coords are nan. ')
 
@@ -152,26 +156,26 @@ if __name__ == '__main__':
                         else:
                             rospy.loginfo("Internal timeout exceeded. Get closest frontier service response time is too high.")               
 
-            output = frontier_proc.communicate()
+                rospy.loginfo("[EVALUATION] Total evaluation success rate: %.2f / %.2f", score, len(test_positions)) 
 
-            rospy.loginfo('Frontier script output:')
 
-            if output[0]:
-                rospy.loginfo(output[0])
-            if output[1]:
-                rospy.loginfo(output[1])
-
-        finally:
-            frontier_proc.terminate()
-            scan_timer.cancel()
-            player_proc.kill()
-            roscore_proc.kill()
+        except Exception as e:
+            rospy.loginfo(f'[EVALUATION] Exception caught: {e}.')
 
         if not serv_start:
             rospy.loginfo('Timeout while waiting for service to start.')
+
+        rospy.loginfo("[EVALUATION] Your node's console output has been written to " + script_output_file + " in your current directory.")
+        rospy.loginfo("[EVALUATION] Waiting for %.2f seconds and exiting", endsleeptime) 
+        rospy.loginfo("[EVALUATION] You can change the sleep time between trials and at the end in this script") 
+        rospy.sleep(endsleeptime)
         
+        scan_timer.cancel()
+        scan_timer2.cancel()
+        scan_timer3.cancel()
+
         #frontier.shutdown()
         frontier_proc.terminate()
-        player_proc.kill()
-        player_proc.kill()
-        roscore_proc.kill()
+        player_proc.terminate()
+        rviz_proc.terminate()
+        roscore_proc.terminate()
