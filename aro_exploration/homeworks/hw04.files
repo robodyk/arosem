@@ -1,6 +1,1 @@
-aro_exploration/config/slam.yaml
-aro_exploration/src/aro_slam/icp.py
-aro_exploration/config/localization/costs.yaml
-aro_exploration/config/localization/costs_icp.yaml
-aro_exploration/config/localization/solver.yaml
 aro_exploration/src/aro_localization/factor_graph.py
