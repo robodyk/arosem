@@ -4,7 +4,7 @@
     <arg name="map_frame" default="icp_map" doc="{icp_map,fused_map}"/>
 
     <node pkg="tf2_ros" type="static_transform_publisher" name="map_tf" args="0 0 0 0 0 0 1 icp_map map" />
-    <node name="frontier" pkg="aro_exploration" type="frontier.py">
+    <node name="frontier" pkg="aro_exploration" type="frontier.py" output="screen">
         <rosparam subst_value="true">
             map_frame: $(arg map_frame)
             robot_frame: base_footprint
@@ -12,7 +12,7 @@
             occupancy_threshold: 90
         </rosparam>
     </node>
-    <node name="planner" pkg="aro_exploration" type="planner.py">
+    <node name="planner" pkg="aro_exploration" type="planner.py" output="screen">
         <rosparam subst_value="true">
             map_frame: $(arg map_frame)
             robot_frame: base_footprint
