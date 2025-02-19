@@ -90,6 +90,8 @@ if __name__ == '__main__':
         # rospy.set_param('robot_frame', 'base_footprint')
         player_proc = subprocess.Popen(['rosbag', 'play', '../../data/planning/map_dat.bag'], cwd=dir)
 
+        rviz_proc = subprocess.Popen(['roslaunch', 'aro_exploration', 'aro_frontier_planning_rviz.launch'])
+
         kill = lambda process : process.terminate()
 
         script_output_file = 'output.txt'

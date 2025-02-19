@@ -239,6 +239,8 @@ def main():
     rospy.set_param('map_frame', 'map')
     player_proc = subprocess.Popen(['rosbag', 'play', '../../data/planning/map_dat.bag'], cwd=dir)
 
+    rviz_proc = subprocess.Popen(['roslaunch', 'aro_exploration', 'aro_frontier_planning_rviz.launch'])
+
     evaluator = PlanningEvaluator()
     kill = lambda process : process.terminate()
 
@@ -292,8 +294,8 @@ def main():
     reference_paths_map.append([(-0.57, 0.03), (-0.52, 0.03), (-0.47, 0.03), (-0.42, 0.03), (-0.37, 0.03), (-0.32, 0.03), (-0.27, 0.03), (-0.22, -0.02), (-0.17, -0.07), (-0.12, -0.07), (-0.07, -0.07), (-0.02, -0.12), (0.03, -0.17), (0.08, -0.22), (0.13, -0.22), (0.18, -0.27), (0.23, -0.27), (0.28, -0.32), (0.33, -0.32), (0.38, -0.37), (0.43, -0.42), (0.48, -0.42), (0.53, -0.42), (0.58, -0.47), (0.63, -0.52), (0.68, -0.57), (0.73, -0.57), (0.78, -0.57), (0.83, -0.62), (0.88, -0.67), (0.93, -0.67), (0.98, -0.72), (1.03, -0.77), (1.08, -0.77), (1.13, -0.77)])
     serv_start = False
     try:
-        rospy.wait_for_service('plan_path', 10)
-        plan_path = rospy.ServiceProxy('plan_path', PlanPath)
+        rospy.wait_for_service('plan_path_publish', 10)
+        plan_path = rospy.ServiceProxy('plan_path_publish', PlanPath)
         serv_start = True
     except Exception as e: 
         planner_proc.terminate()
