@@ -4,7 +4,7 @@
     
     <arg name="map_frame" default="icp_map" />
 
-    <node name="planner" pkg="aro_exploration" type="planner.py">
+    <node name="planner" pkg="aro_exploration" type="planner.py" output="screen">
         <rosparam subst_value="true">
             map_frame: $(arg map_frame)
             robot_frame: base_footprint
