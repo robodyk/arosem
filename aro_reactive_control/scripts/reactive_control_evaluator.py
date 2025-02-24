@@ -55,8 +55,13 @@ class ReactiveControllerEvaluator():
 
         if not self.use_manual_control:
             self.srv_cl_activate_control = rospy.ServiceProxy('/reactive_control/activate', SetBool)
-            rospy.loginfo('Waiting for mission activation service.')
-            self.srv_cl_activate_control.wait_for_service();
+            while not rospy.is_shutdown():
+                try:
+                    self.srv_cl_activate_control.wait_for_service(timeout=1.0)
+                    rospy.loginfo('Connected to mission activation service.')
+                    break
+                except rospy.ROSException:
+                    rospy.logwarn('Waiting for mission activation service.')
 
         self.sub_odom = rospy.Subscriber('/ground_truth_odom', Odometry, self.cb_odom)
         self.sub_sector_dists = rospy.Subscriber('/reactive_control/sector_dists', SectorDistances, self.cb_sectors)
