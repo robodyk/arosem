@@ -97,6 +97,7 @@ class Evaluathor():
             self.distanceDriven += dist
         else:
             self.startingPose = [msg.position.x, msg.position.y]
+            rospy.loginfo("Set starting position to %i, %i" % (int(self.startingPose[0]), int(self.startingPose[1])))
         self.gt_odom = msg
         if self.startTime is None:
             self.startTime = rospy.Time.now()
@@ -106,7 +107,11 @@ class Evaluathor():
             req = GetModelStateRequest()
             req.model_name = "turtlebot3_burger_rgbd"
             req.relative_entity_name = "world"
-            self.process_gt_pose(self.pose_client(req).pose)
+            resp = self.pose_client(req)
+            if not resp.success:
+                rospy.logerr("DID NOT SUCCEED GETTING ROBOT POSITION: %s" % (resp.status_message,))
+            else:
+                self.process_gt_pose(resp.pose)
         except rospy.ServiceException as e:
             if (time.time() - self.realStartTime) > 10.0:
                 rospy.logerr("Service call failed: %s" % (e,))
