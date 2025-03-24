@@ -191,6 +191,9 @@ class Explorer(object):
                     rospy.logwarn('Feasible goal not found during %i retries.',
                                   self.retries)
                     return
+                if self.current_path is None:
+                    rospy.logwarn('Feasible goal found, but no path. Weird.')
+                    return
 
                 # Delegate to path follower.
                 follow_path_goal = FollowPathGoal()
