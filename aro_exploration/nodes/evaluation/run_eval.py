@@ -224,6 +224,7 @@ class Evaluathor():
                           "run_mode:=eval",
                           "record_exploration:=" + ("true" if self.record else "false"),
                           "tf_metrics:=" + ("true" if self.ground_truth else "false"),
+                          "joy_teleop:=false",
                           ]
         if self.record_prefix is not None:
             launch_command += ["exploration_rec_prefix:={}".format(self.record_prefix)]
