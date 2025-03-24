@@ -1,9 +1,13 @@
 #!/usr/bin/env python3
+import time
+
 import rospy
 from nav_msgs.msg import OccupancyGrid, MapMetaData, Odometry
 from std_srvs.srv import SetBool, SetBoolResponse
 from std_msgs.msg import Float32
 from geometry_msgs.msg import PoseStamped, Pose
+from rosgraph_msgs.msg import Clock
+from gazebo_msgs.srv import GetModelState, GetModelStateResponse, GetModelStateRequest
 import lxml.etree as ET
 import numpy as np
 import rospkg
@@ -44,6 +48,7 @@ class Evaluathor():
         self.gui = rospy.get_param("~gui", False)
         self.record = rospy.get_param("~record", False)
         self.record_prefix = rospy.get_param("~record_prefix", None)
+        self.ground_truth = bool(rospy.get_param("~ground_truth", True))
 
         self.sim_launch = None  # variable to hold the simulator launcher
         self.mapIndex = -1  # for running on multiple maps from a list (i.e. requestedMap is a list)
@@ -53,15 +58,22 @@ class Evaluathor():
         self.startTime = None
         self.stopSimVar = False
         self.distanceDriven = 0.0
+        self.realStartTime = time.time()
 
         self.stamp = datetime.now().strftime("%Y_%m_%d_%H_%M_%S")
 
         # compute data fields
         self.dataFields = ["map", "marker", "score"]        
         self.data = []
+        
+        if self.ground_truth:
+            self.gt_odom_sub = rospy.Subscriber(self.GT_ODOM_TOPIC, Odometry, self.process_gt_odom, queue_size=1)
+        else:
+            self.pose_client = rospy.ServiceProxy('/gazebo/get_model_state', GetModelState)
+            # Do not wait for the service, it would block Gazebo startup
+            self.gt_timer = rospy.Timer(rospy.Duration.from_sec(1.0), self.request_gt)
 
         self.markerListener = rospy.Subscriber(self.MARKER_TOPIC, PoseStamped, self.markerUpdate_cb, queue_size=1)
-        self.gt_odom_sub = rospy.Subscriber(self.GT_ODOM_TOPIC, Odometry, self.process_gt_odom, queue_size=1)
         self.gt_odom = None
 
         self.stopSimService = rospy.Service('stop_simulation', SetBool, self.stopSimulation_cb)
@@ -75,16 +87,29 @@ class Evaluathor():
         self.publishedMarkerPose = msg.pose
 
     def process_gt_odom(self, msg):
+        self.process_gt_pose(msg.pose.pose)
+
+    def process_gt_pose(self, msg):
         if self.gt_odom is not None:
             prev_pose = np.array([self.gt_odom.position.x, self.gt_odom.position.y])
-            new_pose = np.array([msg.pose.pose.position.x, msg.pose.pose.position.y])
+            new_pose = np.array([msg.position.x, msg.position.y])
             dist = np.linalg.norm(new_pose - prev_pose)
             self.distanceDriven += dist
         else:
-            self.startingPose = [msg.pose.pose.position.x, msg.pose.pose.position.y]
-        self.gt_odom = msg.pose.pose
+            self.startingPose = [msg.position.x, msg.position.y]
+        self.gt_odom = msg
         if self.startTime is None:
             self.startTime = rospy.Time.now()
+
+    def request_gt(self, event):
+        try:
+            req = GetModelStateRequest()
+            req.model_name = "turtlebot3_burger_rgbd"
+            req.relative_entity_name = "world"
+            self.process_gt_pose(self.pose_client(req).pose)
+        except rospy.ServiceException as e:
+            if (time.time() - self.realStartTime) > 10.0:
+                rospy.logerr("Service call failed: %s" % (e,))
 
     def stopSimulation_cb(self, req):
         self.stopSimVar = req.data
@@ -191,13 +216,14 @@ class Evaluathor():
                           "aro_exploration_sim.launch",
                           "world:={}".format(self.mapName),
                           "marker_config:={}".format(self.requestedMarker),
-                          "ground_truth:=true",
-                          "mr_use_gt:=false",
+                          "ground_truth:=" + ("true" if self.ground_truth else "false"),
+                          "mr_use_gt:=" + ("true" if self.ground_truth else "false"),
                           "rviz:=" + ("true" if self.rviz else "false"),
                           "gui:=" + ("true" if self.gui else "false"),
                           "localization_visualize:=" + ("true" if self.localization_visualize else "false"),
                           "run_mode:=eval",
                           "record_exploration:=" + ("true" if self.record else "false"),
+                          "tf_metrics:=" + ("true" if self.ground_truth else "false"),
                           ]
         if self.record_prefix is not None:
             launch_command += ["exploration_rec_prefix:={}".format(self.record_prefix)]

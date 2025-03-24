@@ -8,6 +8,7 @@
     <arg name="gui" default="false" />
     <arg name="record" default="false" />
     <arg name="record_prefix" default="" />
+    <arg name="ground_truth" default="true" />
 
     <node name="evaluathor" pkg="aro_exploration" type="run_eval.py" output="screen">
         <param name="map_name" value="$(arg world)"/>
@@ -19,5 +20,6 @@
         <param name="gui" value="$(arg gui)"/>
         <param name="record" value="$(arg record)"/>
         <param name="record_prefix" value="$(arg record_prefix)" if="$(eval len(record_prefix) != 0)"/>
+        <param name="ground_truth" value="$(arg ground_truth)" />
     </node>
 </launch>

@@ -9,6 +9,7 @@
     <arg name="fixed_frame" default="icp_map" doc="Just for visualization" />
     <arg name="record" default="false"/>
     <arg name="debug_slam" default="false" doc="Show debugging prints in console" />
+    <arg name="tf_metrics" default="true" doc="Run tf_metrics" />
 
     <node name="icp_slam" pkg="aro_exploration" type="icp_slam" output="screen">
         <rosparam subst_value="true">
@@ -42,7 +43,7 @@
         <remap from="~output" to="icp_odom_vis" />
     </node>
     
-    <include file="$(dirname)/tf_metrics.launch" pass_all_args="true">
+    <include file="$(dirname)/tf_metrics.launch" pass_all_args="true" if="$(arg tf_metrics)">
         <arg name="map_frame" value="icp_map" />
     </include>
     <include file="$(dirname)/record.launch" pass_all_args="true" if="$(arg record)" />
