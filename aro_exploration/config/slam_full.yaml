@@ -1,0 +1,18 @@
+# Students can edit this file to their liking.
+# Configuration of ICP SLAM node.
+
+alignment: frame_to_map  # frame_to_frame/frame_to_map; can be overridden by roslaunch arg
+loss: point_to_plane  # point_to_point/point_to_plane; can be overridden by roslaunch arg
+absorient_domain: SE3  # SE2/SE3; can be overridden by roslaunch arg
+
+max_iters: 100  # Maximum number of ICP iterations.
+  
+inlier_ratio: 0.65  # Ratio of input points to consider as inliers.
+inlier_dist_mult: 2.0  # Dynamically expand the inlier set for optimization to points this much further than the inliers
+                       # selected by inlier_ratio.
+max_inlier_dist: 0.5  # Limit the inliers selected for optimization to inliers with this or better distance.
+
+localized_inlier_ratio: 0.5  # Minimum inlier ratio to tell that ICP localization has succeeded.
+localized_inlier_dist: 0.1  # Maximum mean inlier distance to tell that ICP localization has succeeded.
+mapping_inlier_ratio: 0.8  # Inlier ratio threshold below which the new scan should be appended to the map.
+mapping_min_dist: 0.1  # Minimum mean inlier distance to append the new scan to the map.

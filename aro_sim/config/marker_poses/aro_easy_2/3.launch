@@ -1,7 +1,7 @@
 <launch>
     <!-- This is actually a pretty difficult task in 120 secs -->
     <arg name="ma_x" default="2.53" />
-    <arg name="ma_y" default="-1.99" />
+    <arg name="ma_y" default="-0.99" />
     <arg name="ma_yaw" default="0" />
     
     <arg name="mr_x" default="-3.07" />

@@ -42,6 +42,8 @@ class Evaluathor():
         self.localization_visualize = rospy.get_param("~localization_visualize", False)
         self.rviz = rospy.get_param("~rviz", True)
         self.gui = rospy.get_param("~gui", False)
+        self.record = rospy.get_param("~record", False)
+        self.record_prefix = rospy.get_param("~record_prefix", None)
 
         self.sim_launch = None  # variable to hold the simulator launcher
         self.mapIndex = -1  # for running on multiple maps from a list (i.e. requestedMap is a list)
@@ -194,8 +196,11 @@ class Evaluathor():
                           "rviz:=" + ("true" if self.rviz else "false"),
                           "gui:=" + ("true" if self.gui else "false"),
                           "localization_visualize:=" + ("true" if self.localization_visualize else "false"),
-                          "run_mode:=eval"
+                          "run_mode:=eval",
+                          "record_exploration:=" + ("true" if self.record else "false"),
                           ]
+        if self.record_prefix is not None:
+            launch_command += ["exploration_rec_prefix:={}".format(self.record_prefix)]
 
         sim_launch_file = os.path.join(self.aro_exp_pkg, "launch","exploration","aro_exploration_sim.launch")
         sim_launch_args = launch_command[2:]

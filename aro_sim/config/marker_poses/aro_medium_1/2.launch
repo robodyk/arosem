@@ -1,6 +1,6 @@
 <launch>
     <arg name="ma_x" default="0.66" />
-    <arg name="ma_y" default="0.0" />
+    <arg name="ma_y" default="0.25" />
     <arg name="ma_yaw" default="0" />
     
     <arg name="mr_x" default="0.0" />

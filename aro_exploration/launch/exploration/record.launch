@@ -1,0 +1,19 @@
+<launch>
+    <arg name="world" default="live"/>
+    <arg name="exploration_rec_prefix" default="$(arg world)"/>
+
+    <node name="$(anon exploration_rec)" pkg="rosbag" type="record" output="screen"
+          args="-o $(arg exploration_rec_prefix)
+                /apriltag
+                /frontier_vis
+                /fused_odom
+                /icp_odom
+                /map
+                /occupancy
+                /odom
+                /path
+                /relative_marker_pose
+                /start_and_goal
+                /tf
+                /tf_static"/>
+</launch>

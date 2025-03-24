@@ -5,6 +5,7 @@
     <arg name="map_frame_fast" default="$(arg map_frame)" />
     
     <arg name="rviz" default="true" />
+    <arg name="record_exploration" default="false"/>
     
 
 
@@ -18,4 +19,6 @@
     </node>
 
     <include file="$(dirname)/aro_exploration_rviz.launch" pass_all_args="true" if="$(arg rviz)" />
+
+    <include file="$(dirname)/record.launch" pass_all_args="true" if="$(arg record_exploration)" />
 </launch>
