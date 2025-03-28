@@ -1,5 +1,6 @@
 aro_exploration/nodes/exploration/explorer.py
 aro_exploration/nodes/frontier/frontier.py
+aro_exploration/src/aro_exploration/utils.py
 aro_exploration/nodes/planning/planner.py
 aro_exploration/nodes/control/path_follower.py
 aro_exploration/config/control.yaml
