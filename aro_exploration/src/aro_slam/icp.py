@@ -29,16 +29,20 @@ import unittest
 from dataclasses import dataclass
 from enum import Enum
 from timeit import default_timer as timer
-from typing import Optional, Sequence, Callable, Tuple, Any, List, Union
+from typing import Any, List, Optional, Sequence, Tuple, Union
 
 import numpy as np
-from numpy.lib.recfunctions import unstructured_to_structured
+from numpy.lib.recfunctions import (
+    structured_to_unstructured,
+    unstructured_to_structured,
+)
 from scipy.spatial import cKDTree
 
 from aro_slam.utils import as_unstructured
 
 try:
     import rospy
+
     logdebug = rospy.logdebug
     loginfo = rospy.loginfo
     logwarn = rospy.logwarn
@@ -46,50 +50,56 @@ try:
     has_rospy = True
 except ImportError:
     import sys
-    def logdebug(*args, **kwargs): pass
+
+    def logdebug(*args, **kwargs):
+        pass
+
     loginfo = print
-    def logwarn(*args, **kwargs): print(*args, **kwargs, file=sys.stderr)
-    def logerr(*args, **kwargs): print(*args, **kwargs, file=sys.stderr)
+
+    def logwarn(*args, **kwargs):
+        print(*args, **kwargs, file=sys.stderr)
+
+    def logerr(*args, **kwargs):
+        print(*args, **kwargs, file=sys.stderr)
+
     has_rospy = False
 
-from aro_slam.clouds import e2p, normal, p2e, position, transform, DType
+from aro_slam.clouds import DType, e2p, normal, p2e, position, transform
 
 
 class Loss(Enum):
     """The type of geometrical loss computed for ICP."""
 
-    point_to_plane = 'point_to_plane'
+    point_to_plane = "point_to_plane"
     """Geometrical loss computing distance of the point to the plane given by the corresponding point's normal."""
 
-    point_to_point = 'point_to_point'
+    point_to_point = "point_to_point"
     """Geometrical loss computing point-to-point Euclidean distance."""
 
 
 class AbsorientDomain(Enum):
     """The dimensionality of the absolute orientation problem."""
 
-    SE2 = 'SE2'
+    SE2 = "SE2"
     """Only solve for x, y, yaw coordinates."""
 
-    SE3 = 'SE3'
+    SE3 = "SE3"
     """Solve for x, y, z and 3D rotation."""
 
 
 class Alignment(Enum):
     """What should new scans be aligned to?"""
 
-    frame_to_frame = 'frame_to_frame'
+    frame_to_frame = "frame_to_frame"
     """Align new scans only to the previous scan."""
 
-    frame_to_map = 'frame_to_map'
+    frame_to_map = "frame_to_map"
     """Align new scans to a continually built map."""
 
 
-
-
-
 def index(seq: Sequence[Any], idx: Sequence[int]) -> List[Any]:
-    """Square-bracket-like indexing for non-numpy sequences.
+    """
+    Square-bracket-like indexing for non-numpy sequences.
     :param seq: The input sequence.
     :param idx: The indices of input sequence to select.
     :return: The subset of `seq` with `idx` elements.
@@ -98,8 +108,9 @@ def index(seq: Sequence[Any], idx: Sequence[int]) -> List[Any]:
 
 
 def sample(seq: Sequence[Any], n: int) -> Sequence[Any]:
-    """Get a representative set of `n` samples from `seq`.
-    :param seq: The input sequence. 
+    """
+    Get a representative set of `n` samples from `seq`.
+    :param seq: The input sequence.
     :param n: How many samples to get.
     :return: `n` samples from `seq`.
     """
@@ -110,8 +121,13 @@ def sample(seq: Sequence[Any], n: int) -> Sequence[Any]:
     return s
 
 
-def absolute_orientation(p: np.ndarray, q: np.ndarray, domain=AbsorientDomain.SE2) -> np.ndarray:
-    r"""Find transform R, t between p and q such that the sum of squared distances
+def absolute_orientation(
+    p: np.ndarray,
+    q: np.ndarray,
+    domain=AbsorientDomain.SE2,
+) -> np.ndarray:
+    r"""
+    Find transform R, t between p and q such that the sum of squared distances
 
     .. math:: \sum_{i=0}^{N-1} ||R * p[:, i] + t - q[:, i]||^2
 
@@ -125,36 +141,55 @@ def absolute_orientation(p: np.ndarray, q: np.ndarray, domain=AbsorientDomain.SE
     :return: Optimized SE(D) transform T = [R t; 0... 1]. For SE2, z translation, roll and pitch are zero.
              Numpy array 4x4.
     """
-    assert p.shape == q.shape, 'Inputs must be same size.'
+    assert p.shape == q.shape, "Inputs must be same size."
     assert p.shape[0] == 3
     assert p.shape[1] > 0
 
     # TODO HW 3: Implement absolute orientation for both SE2 and SE3 domains (follow the FIXME markers).
 
     # STEP 1: Center the points in p and q.
-    p_centered = np.zeros_like(p)  # FIXME corresponds to p' from lectures
-    q_centered = np.zeros_like(q)  # FIXME corresponds to q' from lectures
-
+    pm = np.mean(p, axis=1, keepdims=True)
+    qm = np.mean(q, axis=1, keepdims=True)
+    p_centered = p - pm
+    q_centered = q - qm
 
     # STEP 2: Compute optimal rotation R (directly from theta for SE2, or using SVD for SE3).
     # The rotation R^* is the minimizer of \sum_i ||R * p'[:, i] - q'[:, i]||^2 .
     # Hint: use https://numpy.org/doc/stable/reference/generated/numpy.linalg.svd.html for SE3.
     # Notice: np.linalg.svd() returns H = U * diag(s) * V, not U * diag(s) * V'.
-    R = np.eye(3)  # FIXME
+    M = q_centered @ p_centered.T
+    if domain == AbsorientDomain.SE2:
+        th = np.arctan((M[1, 0] - M[0, 1]) / (M[0, 0] + M[1, 1]))
+        cos = np.cos(th)
+        sin = np.sin(th)
+        R = np.array(
+            [
+                [cos, -sin, 0],
+                [sin, cos, 0],
+                [0, 0, 1],
+            ],
+        )
+    else:
+        U, S, Vh = np.linalg.svd(M, compute_uv=True)
 
+        if np.linalg.det(U @ Vh) < 0:
+            S_ = np.eye(S.shape[0])
+            S_[-1, -1] = -1
+            R = U @ S_ @ Vh
+        else:
+            R = U @ Vh
 
     # Sometimes SVD returns a reflection matrix instead of rotation
-    if np.isclose(np.linalg.det(R), -1.0):
-        # FIXME in SE3 case, this is wrong. You should instead negate the last column of V when det(R) is -1
-        R[:, 2] = -R[:, 2]
+    # if np.isclose(np.linalg.det(R), -1.0):
+    #     # FIXME in SE3 case, this is wrong. You should instead negate the last column of V when det(R) is -1
+    #     R[:, 2] = -R[:, 2]
 
     if not np.isclose(np.linalg.det(R), 1.0):
         raise ValueError("Rotation R, R'*R = I, det(R) = 1, could not be found.")
 
     # STEP 3: Finally, apply the formula to compute t from known R.
     # t^* = \argmin_t ||R^* * p~ + t − q~||^2 = q~ − R^* * p~
-    t = np.zeros((3, 1))  # FIXME
-
+    t = qm - R @ pm
 
     # STEP 4: Construct the final transform
     T = np.eye(4)
@@ -162,6 +197,40 @@ def absolute_orientation(p: np.ndarray, q: np.ndarray, domain=AbsorientDomain.SE
     T[:-1, -1:] = t
 
     return T
+
+
+def check_convergence(inl_errs, window_size=10, min_improvement=0.01):
+    """
+    Check if the ICP algorithm has converged based on average relative improvement
+    over a window of iterations, making it robust to non-monotonic convergence.
+
+    Parameters
+    ----------
+    - inl_errs: List of mean errors from previous iterations
+    - window_size: Number of recent iterations to consider
+    - min_improvement: Minimum relative improvement threshold
+
+    Returns
+    -------
+    - Boolean indicating whether to stop the algorithm
+
+    """
+    if len(inl_errs) < window_size * 2:
+        return False
+
+    current_window_avg = sum(inl_errs[-window_size:]) / window_size
+
+    previous_window_avg = sum(inl_errs[-(window_size * 2) : -window_size]) / window_size
+
+    # Avoid division by zero
+    if previous_window_avg == 0:
+        return current_window_avg == 0
+
+    relative_improvement = (
+        previous_window_avg - current_window_avg
+    ) / previous_window_avg
+
+    return relative_improvement < min_improvement
 
 
 @dataclass
@@ -186,10 +255,20 @@ class IcpResult:
     """Covariance of the alignment."""
 
 
-def icp(p_struct: np.ndarray, q_struct: np.ndarray, q_index: Optional[cKDTree] = None, T0: Optional[np.ndarray] = None,
-        max_iters=50, inlier_ratio=1.0, inlier_dist_mult=1.0, max_inlier_dist=float('inf'),
-        loss=Loss.point_to_point, absorient_domain=AbsorientDomain.SE2) -> IcpResult:
-    """Iterative closest point (ICP) algorithm, minimizing sum of squared
+def icp(
+    p_struct: np.ndarray,
+    q_struct: np.ndarray,
+    q_index: Optional[cKDTree] = None,
+    T0: Optional[np.ndarray] = None,
+    max_iters=100,
+    inlier_ratio=1.0,
+    inlier_dist_mult=1.0,
+    max_inlier_dist=float("inf"),
+    loss=Loss.point_to_point,
+    absorient_domain=AbsorientDomain.SE2,
+) -> IcpResult:
+    """
+    Iterative closest point (ICP) algorithm, minimizing sum of squared
     point-to-point or point-to-plane distances.
 
     Input point clouds are structured Numpy arrays, with
@@ -220,7 +299,7 @@ def icp(p_struct: np.ndarray, q_struct: np.ndarray, q_index: Optional[cKDTree] =
     assert T0 is None or (isinstance(T0, np.ndarray) and T0.shape == (4, 4))
     assert max_iters > 0
     assert 0.0 <= inlier_ratio <= 1.0
-    assert 0.0 < inlier_dist_mult
+    assert inlier_dist_mult > 0.0
 
     t = timer()
 
@@ -249,10 +328,9 @@ def icp(p_struct: np.ndarray, q_struct: np.ndarray, q_index: Optional[cKDTree] =
     q_inl: Optional[np.ndarray] = None
 
     # Extract normals for later use in point-to-plane.
-    if loss == Loss.point_to_plane or 'normal_x' in p_struct.dtype.fields:
-        q_normal = normal(q_struct)
-
-
+    if loss == Loss.point_to_plane or "normal_x" in p_struct.dtype.fields:
+        q_normals = normal(q_struct)
+        assert np.allclose(np.linalg.norm(q_normals, axis=1), 1)
 
     # STEP 0: The ICP algorithm starts here.
 
@@ -262,21 +340,27 @@ def icp(p_struct: np.ndarray, q_struct: np.ndarray, q_index: Optional[cKDTree] =
     for iter in range(max_iters):
         # TODO HW 3: Transform source points p_struct using last known T to align with reference points.
         # Hint: use imported function transform()
-
+        p_ = transform(T, p_struct)
+        p_ = position(p_)
 
         # STEP 2: Solve nearest neighbors.
         # TODO HW 3: Find correspondences (Nearest Neighbors Search).
         # Find distances between source and reference point clouds and corresponding indexes.
         # Hint: use https://docs.scipy.org/doc/scipy/reference/generated/scipy.spatial.cKDTree.query.html .
         # For point-to-plane loss, create the virtual q^ points and recompute distances from those.
+        dists, c = q_index.query(p_)
+        if loss == Loss.point_to_plane:
+            n = len(c)
+            q_ = np.ndarray((n, 3))
+            q_sel = q[c]
+            norm_sel = q_normals[c]
+            p_shift = p_ - q_sel
+            for i, (qi, pi, q_normal) in enumerate(zip(q_sel, p_shift, norm_sel)):
+                q_[i] = (np.eye(3) - np.outer(q_normal, q_normal)) @ pi + qi
+            dists = np.linalg.norm(q_ - p_, axis=1)
 
         # Distances of points from p to their nearest neighbors in q_index. Don't forget that point-to-plane computes
         # the distances differently.
-        dists = np.zeros(len(p_struct))  # FIXME
-        # Indices of nearest neighbors in q_index, correspondences c(i).
-        c = np.random.randint(len(q_struct), size=p_struct.shape)  # FIXME
-
-
 
         # STEP 3: Outlier rejection by median thresholding.
         # Construct the set of inliers (median filter, already implemented here).
@@ -291,30 +375,44 @@ def icp(p_struct: np.ndarray, q_struct: np.ndarray, q_index: Optional[cKDTree] =
         inl_ratios.append(inl.mean())
         n_inliers = inl.sum()
         if n_inliers == 0:
-            logwarn('Not enough inliers: %i.', n_inliers)
+            logwarn("Not enough inliers: %i.", n_inliers)
             break
 
         # STEP 4: Stop if inlier error does not change much for some time.
         # TODO HW 3: Stop the ICP loop when the inliers error does not change much (call `break` when converged)
         # Array inl_errs contains a history of errors, so look for changes in there.
-
+        if check_convergence(inl_errs):
+            break
 
         # STEP 5: Solve absolute orientation for inliers.
         p_inl = p[inl]
-        q_inl = q[c[inl]]  # FIXME Change q_inl to the virtual points q^ for point-to-plane loss
-
+        if loss == Loss.point_to_point:
+            q_inl = q[c[inl]]
+        else:
+            q_inl = q_[inl]
 
         # Use the inlier points with found correspondences to compute updated T (already implemented here).
         try:
             T = absolute_orientation(p_inl.T, q_inl.T, domain=absorient_domain)
         except ValueError as ex:
-            logerr('Absolute orientation failed: %s', ex)
-            return IcpResult(num_iters=iter, correspondences=c, inliers=inl, p_inliers=p_inl, q_inliers=q_inl)
+            logerr("Absolute orientation failed: %s", ex)
+            return IcpResult(
+                num_iters=iter,
+                correspondences=c,
+                inliers=inl,
+                p_inliers=p_inl,
+                q_inliers=q_inl,
+            )
     else:
         # This else is executed only when the for loop did not stop using break. This means the stopping condition has
         # not been met, thus ICP did not converge.
-        logwarn('Max iter. %i: inliers: %.2f, mean dist.: %.3g, max dist: %.3g.',
-                max_iters, inl.mean(), inl_errs[-1], d_max)
+        logwarn(
+            "Max iter. %i: inliers: %.2f, mean dist.: %.3g, max dist: %.3g.",
+            max_iters,
+            inl.mean(),
+            inl_errs[-1],
+            d_max,
+        )
 
     # Compute covariance of the alignment (already implemented here).
     # The covariance computation is only valid for point-to-plane losses, but we provide it even for point-to-point
@@ -322,21 +420,31 @@ def icp(p_struct: np.ndarray, q_struct: np.ndarray, q_index: Optional[cKDTree] =
     # The computation is based on:
     # Barczyk, M. & Bonnabel, S. & Goulette, F. (2014). Observability, Covariance and Uncertainty of ICP Scan Matching.
     cov: Optional[np.ndarray] = None
-    if 'normal_x' in p_struct.dtype.fields and inl.sum() > 0:
+    if "normal_x" in p_struct.dtype.fields and inl.sum() > 0:
         p_inl = p[inl]
-        normals = q_normal[c[inl]]
+        normals = q_normals[c[inl]]
         sigma = 0.01  # Estimated std.dev. of the lidar range measurements
         dim = 3 if absorient_domain == AbsorientDomain.SE2 else 6
         A = np.zeros((dim, dim))
         for i in range(p_inl.shape[0]):
             if absorient_domain == AbsorientDomain.SE2:
-                Hi = np.array([[
-                    normals[i, 0],
-                    normals[i, 1],
-                    normals[i, 1] * p_inl[i, 0] - normals[i, 0] * p_inl[i, 1],
-                    ]])
+                Hi = np.array(
+                    [
+                        [
+                            normals[i, 0],
+                            normals[i, 1],
+                            normals[i, 1] * p_inl[i, 0] - normals[i, 0] * p_inl[i, 1],
+                        ],
+                    ],
+                )
             else:
-                Hi = np.array([np.hstack((-normals[i, :], -np.cross(p_inl[i, :], normals[i, :])))])
+                Hi = np.array(
+                    [
+                        np.hstack(
+                            (-normals[i, :], -np.cross(p_inl[i, :], normals[i, :])),
+                        ),
+                    ],
+                )
             A += Hi.T @ Hi
         cov = np.power(sigma, 2) * np.linalg.inv(A + np.eye(dim) * 1e-15)
         if absorient_domain == AbsorientDomain.SE2:
@@ -345,22 +453,38 @@ def icp(p_struct: np.ndarray, q_struct: np.ndarray, q_index: Optional[cKDTree] =
             cov[np.ix_((0, 1, 5), (0, 1, 5))] = cov3
 
     # Log ICP stats
-    if iter >= max_iters / 2 or inl_errs and inl_errs[0] >= 0.01:
+    if iter >= max_iters / 2 or (inl_errs and inl_errs[0] >= 0.01):
         log = logdebug if inl_errs[0] >= inl_errs[-1] else logwarn
         samples = sample(list(zip(inl_errs, inl_ratios))[::-1], 10)
-        samples_str = '; '.join(['%.3g, %.2g' % ir for ir in samples])
-        log('Inl. error, delta, ratio (from last): %s (%i it., %.2f s)', samples_str, iter, timer() - t)
+        samples_str = "; ".join(["%.3g, %.2g" % ir for ir in samples])
+        log(
+            "Inl. error, delta, ratio (from last): %s (%i it., %.2f s)",
+            samples_str,
+            iter,
+            timer() - t,
+        )
+
+    return IcpResult(
+        T=T,
+        num_iters=iter,
+        correspondences=c,
+        inliers=inl,
+        p_inliers=p_inl,
+        q_inliers=q_inl,
+        mean_inlier_dist=inl_errs[-1] if inl_errs else float("nan"),
+        cov=cov,
+    )
 
 
-
-    return IcpResult(T=T, num_iters=iter, correspondences=c, inliers=inl, p_inliers=p_inl, q_inliers=q_inl,
-                     mean_inlier_dist=inl_errs[-1] if inl_errs else float('nan'), cov=cov)
-
-
-def update_map(q_struct: Optional[np.ndarray], q_index: cKDTree, p_struct_aligned: np.ndarray, min_dist: float,
-               alignment: Alignment = Alignment.frame_to_frame) \
-        -> Tuple[np.ndarray, cKDTree, int]:
-    """Update the scan/map q according to the given update rule with new points from p_struct_aligned.
+def update_map(
+    q_struct: Optional[np.ndarray],
+    q_index: cKDTree,
+    p_struct_aligned: np.ndarray,
+    min_dist: float,
+    alignment: Alignment = Alignment.frame_to_frame,
+) -> Tuple[np.ndarray, cKDTree, int]:
+    """
+    Update the scan/map q according to the given update rule with new points from p_struct_aligned.
 
     :param q_struct: Structured Numpy array with the last scan/current map q (may be None in the beginning).
                      Numpy array 3xN.
@@ -379,15 +503,19 @@ def update_map(q_struct: Optional[np.ndarray], q_index: cKDTree, p_struct_aligne
         # Look at the aligned points from p_struct_aligned and concatenate them to the old map q_struct such that
         # new points are not close to any old map point.
         p = position(p_struct_aligned)
-        new_q_struct = p_struct_aligned  # FIXME new_q_struct should be the concatenation of new points and old map
-        num_new_points = np.ones(q_struct.shape, dtype=bool).sum()  # FIXME this should be the number of added points
-
+        q = position(q_struct)
+        dists, _ = q_index.query(p)
+        new_p = p[dists > min_dist]
+        new_q = np.vstack((q, new_p))
+        new_q_struct = unstructured_to_structured(new_q, names=["x", "y", "z"])
+        num_new_points = new_p.shape[0]
 
     new_q_index = cKDTree(position(new_q_struct))
     return new_q_struct, new_q_index, num_new_points
 
 
 # TESTS #######################################################################
+
 
 def affine(T: np.ndarray, x: np.ndarray) -> np.ndarray:
     y = p2e(np.matmul(T, e2p(x, axis=0)), axis=0)
@@ -398,8 +526,7 @@ def rotation_z(angle: Union[float, np.ndarray], d=3) -> np.ndarray:
     T = np.eye(d + 1)
     cos = np.cos(angle)
     sin = np.sin(angle)
-    T[:2, :2] = [[cos, -sin],
-                 [sin,  cos]]
+    T[:2, :2] = [[cos, -sin], [sin, cos]]
     return T
 
 
@@ -407,17 +534,16 @@ def translation(t: Union[np.ndarray, Sequence[float]], d=3) -> np.ndarray:
     if isinstance(t, np.ndarray):
         t = t.ravel().tolist()
     T = np.eye(d + 1)
-    T[:len(t), -1] = t
+    T[: len(t), -1] = t
     return T
 
 
-def points(n: int, low=0., high=1., d=3) -> np.ndarray:
+def points(n: int, low=0.0, high=1.0, d=3) -> np.ndarray:
     x = np.random.uniform(low, high, (d, n))
     return x
 
 
 class TestAbsoluteOrientation(unittest.TestCase):
-
     def test_r3z45_2d(self):
         T_gt = rotation_z(np.pi / 4)
         x = points(10)
@@ -447,28 +573,28 @@ class TestAbsoluteOrientation(unittest.TestCase):
         self.assertTrue(np.allclose(T, T_gt))
 
     def test_t3x_2d(self):
-        T_gt = translation([1.])
+        T_gt = translation([1.0])
         x = points(10)
         y = affine(T_gt, x)
         T = absolute_orientation(x, y, domain=AbsorientDomain.SE2)
         self.assertTrue(np.allclose(T, T_gt))
 
     def test_t3x(self):
-        T_gt = translation([1.], d=3)
+        T_gt = translation([1.0], d=3)
         x = points(10, d=3)
         y = affine(T_gt, x)
         T = absolute_orientation(x, y, domain=AbsorientDomain.SE3)
         self.assertTrue(np.allclose(T, T_gt))
 
     def test_t3y_2d(self):
-        T_gt = translation([0., 1.])
+        T_gt = translation([0.0, 1.0])
         x = points(10)
         y = affine(T_gt, x)
         T = absolute_orientation(x, y, domain=AbsorientDomain.SE2)
         self.assertTrue(np.allclose(T, T_gt))
 
     def test_t3y(self):
-        T_gt = translation([0., 1.], d=3)
+        T_gt = translation([0.0, 1.0], d=3)
         x = points(10, d=3)
         y = affine(T_gt, x)
         T = absolute_orientation(x, y, domain=AbsorientDomain.SE3)
@@ -477,32 +603,37 @@ class TestAbsoluteOrientation(unittest.TestCase):
     def test_negative_determinant_se3(self):
         # This leads to negative determinant of R at least in the teacher code.
         # The test verifies you are handling this case correctly.
-        T_gt = np.array([
-            [0.956108, 0.194712, 0.218960, -0.195608],
-            [-0.168883, 0.976859, -0.131239, -0.145734],
-            [-0.239447, 0.088500, 0.966867, -0.083456],
-            [0.0, 0.0, 0.0, 1.0]
-        ])
-        x = np.array([
-            [-0.360751390, 0.801239073, 1.151251196, -0.751251220, -1.006138205],
-            [2.225036859, 1.298862934, 0.358819037, -0.158819049, 0.807106792],
-            [0.198875606, -0.006014668, -0.067731253, 0.267731249, 0.312674701],
-        ])
-        y = np.array([
-            [-0.099694535, 1.0, 1.0, -1.0, -1.0],
-            [2.0, 1.023114442, 0.055058654, -0.213393121, 0.768085300],
-            [0.378164887, -0.203290700, -0.424133777, 0.387260913, 0.567534267]
-        ])
+        T_gt = np.array(
+            [
+                [0.956108, 0.194712, 0.218960, -0.195608],
+                [-0.168883, 0.976859, -0.131239, -0.145734],
+                [-0.239447, 0.088500, 0.966867, -0.083456],
+                [0.0, 0.0, 0.0, 1.0],
+            ],
+        )
+        x = np.array(
+            [
+                [-0.360751390, 0.801239073, 1.151251196, -0.751251220, -1.006138205],
+                [2.225036859, 1.298862934, 0.358819037, -0.158819049, 0.807106792],
+                [0.198875606, -0.006014668, -0.067731253, 0.267731249, 0.312674701],
+            ],
+        )
+        y = np.array(
+            [
+                [-0.099694535, 1.0, 1.0, -1.0, -1.0],
+                [2.0, 1.023114442, 0.055058654, -0.213393121, 0.768085300],
+                [0.378164887, -0.203290700, -0.424133777, 0.387260913, 0.567534267],
+            ],
+        )
         T = absolute_orientation(x, y, domain=AbsorientDomain.SE3)
         self.assertTrue(np.allclose(T, T_gt))
 
 
 class TestIcp(unittest.TestCase):
-
     def test_r3z(self):
-        T_gt = rotation_z(np.radians(5.))
+        T_gt = rotation_z(np.radians(5.0))
         x = points(100)
-        x = unstructured_to_structured(x.T, names=['x', 'y', 'z'])
+        x = unstructured_to_structured(x.T, names=["x", "y", "z"])
         y = transform(T_gt, x)
         T = icp(x, y).T
         self.assertTrue(np.allclose(T, T_gt))
@@ -510,99 +641,134 @@ class TestIcp(unittest.TestCase):
     def test_t3x(self):
         T_gt = translation([0.001])
         x = points(100)
-        x = unstructured_to_structured(x.T, names=['x', 'y', 'z'])
+        x = unstructured_to_structured(x.T, names=["x", "y", "z"])
         y = transform(T_gt, x)
         T = icp(x, y).T
         self.assertTrue(np.allclose(T, T_gt, atol=1e-6))
 
     def test_plane_2d(self):
-        T_gt = translation([0., 0., 0.])
-        x = np.array([
-            [-1, 0, 1],
-            [1, 1, 1],
-            [0, 0, 0],
-            [0, 0, 0],
-            [-1, -1, -1],
-            [0, 0, 0],
-        ], dtype=np.float32)
-        x = unstructured_to_structured(x.T, names=['x', 'y', 'z', 'normal_x', 'normal_y', 'normal_z'])
+        T_gt = translation([0.0, 0.0, 0.0])
+        x = np.array(
+            [
+                [-1, 0, 1],
+                [1, 1, 1],
+                [0, 0, 0],
+                [0, 0, 0],
+                [-1, -1, -1],
+                [0, 0, 0],
+            ],
+            dtype=np.float32,
+        )
+        x = unstructured_to_structured(
+            x.T,
+            names=["x", "y", "z", "normal_x", "normal_y", "normal_z"],
+        )
         y = x.copy()
-        y['x'] += 1
+        y["x"] += 1
         res = icp(x, y, loss=Loss.point_to_plane)
         self.assertTrue(np.allclose(res.T[:3, :3], T_gt[:3, :3], atol=1e-6))
         # Do not check x translation as it can be anything.
         self.assertTrue(np.allclose(res.T[1:, 3], T_gt[1:, 3], atol=1e-6))
 
     def test_plane_2d_p2point(self):
-        T_gt = translation([0., 0., 0.])
-        x = np.array([
-            [-1, 0, 1],
-            [1, 1, 1],
-            [0, 0, 0],
-            [0, 0, 0],
-            [-1, -1, -1],
-            [0, 0, 0],
-        ], dtype=np.float32)
-        x = unstructured_to_structured(x.T, names=['x', 'y', 'z', 'normal_x', 'normal_y', 'normal_z'])
+        T_gt = translation([0.0, 0.0, 0.0])
+        x = np.array(
+            [
+                [-1, 0, 1],
+                [1, 1, 1],
+                [0, 0, 0],
+                [0, 0, 0],
+                [-1, -1, -1],
+                [0, 0, 0],
+            ],
+            dtype=np.float32,
+        )
+        x = unstructured_to_structured(
+            x.T,
+            names=["x", "y", "z", "normal_x", "normal_y", "normal_z"],
+        )
         y = x.copy()
-        y['x'] += 1
+        y["x"] += 1
         res = icp(x, y, loss=Loss.point_to_point, max_inlier_dist=0.5)
         self.assertTrue(np.allclose(res.T, T_gt, atol=1e-6))
 
     def test_plane_3d(self):
-        T_gt = translation([0., 0., 0.])
-        x = np.array([
-            [-1, 0, 1, 0],
-            [1, 1, 1, 0],
-            [0, 0, 0, 0],
-            [0, 0, 0, 0],
-            [-1, -1, -1, -1],
-            [0, 0, 0, 0],
-        ], dtype=np.float32)
-        x = unstructured_to_structured(x.T, names=['x', 'y', 'z', 'normal_x', 'normal_y', 'normal_z'])
+        T_gt = translation([0.0, 0.0, 0.0])
+        x = np.array(
+            [
+                [-1, 0, 1, 0],
+                [1, 1, 1, 0],
+                [0, 0, 0, 0],
+                [0, 0, 0, 0],
+                [-1, -1, -1, -1],
+                [0, 0, 0, 0],
+            ],
+            dtype=np.float32,
+        )
+        x = unstructured_to_structured(
+            x.T,
+            names=["x", "y", "z", "normal_x", "normal_y", "normal_z"],
+        )
         y = x.copy()
-        y['x'] += 1
-        y['x'][3] -= 0.1  # Without this, there would be two possible nearest neighbors for the last point
+        y["x"] += 1
+        y["x"][3] -= (
+            0.1  # Without this, there would be two possible nearest neighbors for the last point
+        )
         res = icp(x, y, loss=Loss.point_to_plane, absorient_domain=AbsorientDomain.SE3)
         self.assertTrue(np.allclose(res.T[:3, :3], T_gt[:3, :3], atol=1e-6))
         # Do not check x translation as it can be anything.
         self.assertTrue(np.allclose(res.T[1:, 3], T_gt[1:, 3], atol=1e-6))
 
     def test_plane_3d_p2point(self):
-        T_gt = translation([0., 0., 0.])
-        x = np.array([
-            [-1, 0, 1],
-            [1, 1, 1],
-            [0, 0, 0],
-            [0, 0, 0],
-            [-1, -1, -1],
-            [0, 0, 0],
-        ], dtype=np.float32)
-        x = unstructured_to_structured(x.T, names=['x', 'y', 'z', 'normal_x', 'normal_y', 'normal_z'])
+        T_gt = translation([0.0, 0.0, 0.0])
+        x = np.array(
+            [
+                [-1, 0, 1],
+                [1, 1, 1],
+                [0, 0, 0],
+                [0, 0, 0],
+                [-1, -1, -1],
+                [0, 0, 0],
+            ],
+            dtype=np.float32,
+        )
+        x = unstructured_to_structured(
+            x.T,
+            names=["x", "y", "z", "normal_x", "normal_y", "normal_z"],
+        )
         y = x.copy()
-        y['x'] += 1
-        res = icp(x, y, loss=Loss.point_to_point, absorient_domain=AbsorientDomain.SE3, max_inlier_dist=0.5)
+        y["x"] += 1
+        res = icp(
+            x,
+            y,
+            loss=Loss.point_to_point,
+            absorient_domain=AbsorientDomain.SE3,
+            max_inlier_dist=0.5,
+        )
         self.assertTrue(np.allclose(res.T, T_gt, atol=1e-6))
 
 
 class TestUpdateMap(unittest.TestCase):
-
     def test_frame_to_frame(self):
-        y = np.array([[0, 1,  0, -1],
-                      [1, 0, -1,  0],
-                      [0, 0,  0,  0]], dtype=np.float32)
+        y = np.array([[0, 1, 0, -1], [1, 0, -1, 0], [0, 0, 0, 0]], dtype=np.float32)
         y_str = unstructured_to_structured(y.T, dtype=DType.position.value)
         x = y_str[:2]
-        res = update_map(x, cKDTree(as_unstructured(x)), y_str[2:], 1.0, alignment=Alignment.frame_to_frame)
+        res = update_map(
+            x,
+            cKDTree(as_unstructured(x)),
+            y_str[2:],
+            1.0,
+            alignment=Alignment.frame_to_frame,
+        )
         new_map, _, num_new = res
         self.assertEqual(2, num_new)
         self.assertEqual((2,), new_map.shape)
-        self.assertTrue(np.allclose(as_unstructured(y_str[2:]), as_unstructured(new_map)))
+        self.assertTrue(
+            np.allclose(as_unstructured(y_str[2:]), as_unstructured(new_map)),
+        )
 
     def test_frame_to_frame_none(self):
-        y = np.array([[0, 1,  0, -1],
-                      [1, 0, -1,  0],
-                      [0, 0,  0,  0]], dtype=np.float32)
+        y = np.array([[0, 1, 0, -1], [1, 0, -1, 0], [0, 0, 0, 0]], dtype=np.float32)
         y_str = unstructured_to_structured(y.T, dtype=DType.position.value)
         res = update_map(None, None, y_str, 1.0, alignment=Alignment.frame_to_frame)
         new_map, _, num_new = res
@@ -611,12 +777,16 @@ class TestUpdateMap(unittest.TestCase):
         self.assertTrue(np.allclose(as_unstructured(y_str), as_unstructured(new_map)))
 
     def test_frame_to_map(self):
-        y = np.array([[0, 1,  0, -1],
-                      [1, 0, -1,  0],
-                      [0, 0,  0,  0]], dtype=np.float32)
+        y = np.array([[0, 1, 0, -1], [1, 0, -1, 0], [0, 0, 0, 0]], dtype=np.float32)
         y_str = unstructured_to_structured(y.T, dtype=DType.position.value)
         x = y_str[:2]
-        res = update_map(x, cKDTree(as_unstructured(x)), y_str[2:], 1.0, alignment=Alignment.frame_to_map)
+        res = update_map(
+            x,
+            cKDTree(as_unstructured(x)),
+            y_str[2:],
+            1.0,
+            alignment=Alignment.frame_to_map,
+        )
         new_map, _, num_new = res
         self.assertEqual(2, num_new)
         self.assertEqual((4,), new_map.shape)
@@ -625,9 +795,7 @@ class TestUpdateMap(unittest.TestCase):
         self.assertTrue(np.allclose(y_sorted, new_sorted))
 
     def test_frame_to_map_none(self):
-        y = np.array([[0, 1,  0, -1],
-                      [1, 0, -1,  0],
-                      [0, 0,  0,  0]], dtype=np.float32)
+        y = np.array([[0, 1, 0, -1], [1, 0, -1, 0], [0, 0, 0, 0]], dtype=np.float32)
         y_str = unstructured_to_structured(y.T, dtype=DType.position.value)
         res = update_map(None, None, y_str, 1.0, alignment=Alignment.frame_to_map)
         new_map, _, num_new = res
@@ -645,6 +813,7 @@ def main():
 
 def absorient_demo():
     from aro_slam.utils import visualize_clouds_2d
+
     """
     A function to test implementation of Absolute Orientation algorithm.
     """
@@ -652,7 +821,12 @@ def absorient_demo():
     # initialize perturbation rotation
     theta_true = np.pi / 4
     R_true = np.eye(3)
-    R_true[:2, :2] = np.array([[np.cos(theta_true), -np.sin(theta_true)], [np.sin(theta_true), np.cos(theta_true)]])
+    R_true[:2, :2] = np.array(
+        [
+            [np.cos(theta_true), -np.sin(theta_true)],
+            [np.sin(theta_true), np.cos(theta_true)],
+        ],
+    )
     t_true = np.array([[-2.0], [5.0], [0.0]])
     Tr_gt = np.eye(4)
     Tr_gt[:3, :3] = R_true
@@ -661,7 +835,7 @@ def absorient_demo():
     # Generate data as a list of 2d points
     num_points = 30
     true_data = np.zeros((3, num_points))
-    true_data[0, :] = range(0, num_points)
+    true_data[0, :] = range(num_points)
     true_data[1, :] = 0.2 * true_data[0, :] * np.sin(0.5 * true_data[0, :])
 
     # Move the data
@@ -679,7 +853,12 @@ def absorient_demo():
     P = moved_data
 
     # visualize not aligned point clouds
-    visualize_clouds_2d(P.T, Q.T, markersize=4, title="Input clouds. Close the window to proceed.")
+    visualize_clouds_2d(
+        P.T,
+        Q.T,
+        markersize=4,
+        title="Input clouds. Close the window to proceed.",
+    )
 
     # choose inliers for alignment
     n_inl = num_points
@@ -695,9 +874,9 @@ def absorient_demo():
     theta_diff = np.abs(theta - theta_true)
     t_diff = np.linalg.norm(t_true.T - Tr_inv[:3, 3].T)
 
-    print('ICP found transformation:\n%s\n' % (Tr,))
-    print('GT transformation:\n%s\n' % (np.linalg.inv(Tr_gt),))
-    print('Translation error: %.3f m, rotation error %.4f rad' % (t_diff, theta_diff))
+    print("ICP found transformation:\n%s\n" % (Tr,))
+    print("GT transformation:\n%s\n" % (np.linalg.inv(Tr_gt),))
+    print("Translation error: %.3f m, rotation error %.4f rad" % (t_diff, theta_diff))
     if t_diff < 0.1 and theta_diff < 0.01:
         print("absolute_orientation works OKAY")
     else:
@@ -705,13 +884,20 @@ def absorient_demo():
 
     # visualize the clouds after ICP alignment with found transformation
     P_aligned = Tr[:3, :3] @ P + Tr[:3, 3:]
-    visualize_clouds_2d(P_aligned.T, Q.T, markersize=4, title="Aligned clouds. Close the window to proceed.")
+    visualize_clouds_2d(
+        P_aligned.T,
+        Q.T,
+        markersize=4,
+        title="Aligned clouds. Close the window to proceed.",
+    )
 
 
 def icp_demo():
     import os
-    from aro_slam.utils import visualize_clouds_3d, filter_grid
+
     from aro_slam.icp_io import read_cloud, read_poses
+    from aro_slam.utils import filter_grid, visualize_clouds_3d
+
     """
     The function utilizes a pair of point cloud scans captured in an indoor corridor-like environment.
     We run ICP algorithm to find a transformation that aligns the pair of clouds.
@@ -728,32 +914,37 @@ def icp_demo():
     # Use XDG_CACHE_HOME according to https://specifications.freedesktop.org/basedir-spec/basedir-spec-latest.html .
     default_cache_dir = os.path.join(os.environ.get("HOME", "tmp"), ".cache")
     cache_dir = os.environ.get("XDG_CACHE_HOME", default_cache_dir)
-    path = os.path.normpath(os.path.join(cache_dir, 'fee_corridor'))
+    path = os.path.normpath(os.path.join(cache_dir, "fee_corridor"))
 
-    id1, id2 = '1669300991_618086656', '1669301026_319255296'
+    id1, id2 = "1669300991_618086656", "1669301026_319255296"
 
     if not os.path.exists(path):
         os.makedirs(path)
-        url = 'http://ptak.felk.cvut.cz/vras/data/fee_corridor/sequences/seq2'
-        os.system('wget %s/poses/poses.csv -P %s' % (url, path))
-        os.system('wget %s/ouster_points/%s.npz -P %s' % (url, id1, path))
-        os.system('wget %s/ouster_points/%s.npz -P %s' % (url, id2, path))
+        url = "http://ptak.felk.cvut.cz/vras/data/fee_corridor/sequences/seq2"
+        os.system("wget %s/poses/poses.csv -P %s" % (url, path))
+        os.system("wget %s/ouster_points/%s.npz -P %s" % (url, id1, path))
+        os.system("wget %s/ouster_points/%s.npz -P %s" % (url, id2, path))
 
     # load cloud poses
-    poses = read_poses(os.path.join(path, 'poses.csv'))
+    poses = read_poses(os.path.join(path, "poses.csv"))
     pose1 = poses[id1]
     pose2 = poses[id2]
 
     # load point clouds
-    cloud1 = read_cloud(os.path.join(path, '%s.npz' % id1))
-    cloud2 = read_cloud(os.path.join(path, '%s.npz' % id2))
+    cloud1 = read_cloud(os.path.join(path, "%s.npz" % id1))
+    cloud2 = read_cloud(os.path.join(path, "%s.npz" % id2))
 
     # apply grid filtering to point clouds
     cloud1 = filter_grid(cloud1, grid_res=0.1)
     cloud2 = filter_grid(cloud2, grid_res=0.1)
 
     # visualize not aligned point clouds
-    visualize_clouds_3d(cloud1, cloud2, markersize=0.3, title="Input clouds. Close the window to proceed.")
+    visualize_clouds_3d(
+        cloud1,
+        cloud2,
+        markersize=0.3,
+        title="Input clouds. Close the window to proceed.",
+    )
 
     # ground truth transformation that aligns the point clouds (from data set)
     Tr_gt = np.linalg.inv(pose2) @ pose1
@@ -761,8 +952,16 @@ def icp_demo():
     # run ICP algorithm to estimate the transformation (it is initialized with identity matrix)
     Tr_init = np.eye(4)
     loss = Loss.point_to_point
-    res = icp(cloud1, cloud2, T0=Tr_init, inlier_ratio=0.9, inlier_dist_mult=2.0, max_iters=100,
-              loss=loss, absorient_domain=AbsorientDomain.SE2)
+    res = icp(
+        cloud1,
+        cloud2,
+        T0=Tr_init,
+        inlier_ratio=0.9,
+        inlier_dist_mult=2.0,
+        max_iters=100,
+        loss=loss,
+        absorient_domain=AbsorientDomain.SE2,
+    )
     Tr_icp = res.T
 
     theta = np.arctan2(Tr_icp[0, 0], Tr_icp[1, 0])
@@ -770,20 +969,28 @@ def icp_demo():
     theta_diff = np.abs(theta - theta_true)
     t_diff = np.linalg.norm(Tr_gt[:3, 3].T - Tr_icp[:3, 3].T)
 
-    print('ICP found transformation:\n%s\n' % Tr_icp)
-    print('GT transformation:\n%s\n' % Tr_gt)
-    print('ICP mean inliers distance: %.3f [m]' % res.mean_inlier_dist)
-    print('ICP transform translation error: %.3f m, z rotation error %.4f rad' % (t_diff, theta_diff))
+    print("ICP found transformation:\n%s\n" % Tr_icp)
+    print("GT transformation:\n%s\n" % Tr_gt)
+    print("ICP mean inliers distance: %.3f [m]" % res.mean_inlier_dist)
+    print(
+        "ICP transform translation error: %.3f m, z rotation error %.4f rad"
+        % (t_diff, theta_diff),
+    )
     if t_diff < (0.1 if loss == Loss.point_to_plane else 0.25) and theta_diff < 0.01:
         print("icp works OKAY")
     else:
         print("icp works WRONG")
 
     # visualize the clouds after ICP alignment with found transformation
-    visualize_clouds_3d(transform(Tr_icp, cloud1), cloud2, markersize=0.3, title="Aligned clouds.")
+    visualize_clouds_3d(
+        transform(Tr_icp, cloud1),
+        cloud2,
+        markersize=0.3,
+        title="Aligned clouds.",
+    )
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     # main()
     if has_rospy:
         rospy.core.configure_logging("icp")

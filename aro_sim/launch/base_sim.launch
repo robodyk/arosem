@@ -13,7 +13,7 @@
     <arg name="odom_frame" default="odom" doc="Odometry topic to be converted to tf." />
     <arg name="real_time_factor" default="1.0" doc="Set to less than 1 to slow down the simulation." />
     <arg name="keyboard_teleop" default="false" doc="Set to true to enable control of the robot via keyboard" />
-    <arg name="joy_teleop" default="true" doc="Set to true to enable control of the robot via gamepad" />
+    <arg name="joy_teleop" default="false" doc="Set to true to enable control of the robot via gamepad" />
     <arg name="rviz_config" default="$(dirname)/../rviz/base_sim.rviz" doc="Rviz config." />
     <arg name="gazebo_verbose" default="false" doc="Turn on verbose logging of Gazebo." />
     <arg name="software_rendering" default="$(optenv ARO_HEADLESS false)" />

@@ -1,0 +1,11 @@
+[INFO] [1745702129.090170] [/path_planner]: Path planner initialized.
+[INFO] [1745702134.521514] [/path_planner]: Publishing start and goal markers.
+[INFO] [1745702134.537348] [/path_planner]: Publishing plan.
+[INFO] [1745702135.564921] [/path_planner]: Publishing start and goal markers.
+[INFO] [1745702135.596989] [/path_planner]: Publishing plan.
+[INFO] [1745702136.627516] [/path_planner]: Publishing start and goal markers.
+[INFO] [1745702136.662691] [/path_planner]: Publishing plan.
+[INFO] [1745702137.688907] [/path_planner]: Publishing start and goal markers.
+[INFO] [1745702137.701497] [/path_planner]: Publishing plan.
+[INFO] [1745702138.721652] [/path_planner]: Publishing start and goal markers.
+[INFO] [1745702138.741420] [/path_planner]: Publishing plan.

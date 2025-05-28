@@ -1,4 +1,5 @@
-"""Generalized implementation of scipy.optimize.least_squares that allows using different sparse Least-squares solvers
+"""
+Generalized implementation of scipy.optimize.least_squares that allows using different sparse Least-squares solvers
 than the 3 officially supported (**lm**, **trf**, **dogbox**) to support solving nonlinear least-squares problems.
 
 **trf (Trust-Region)** solver is usually quite fast and good with sparse matrices, but we have observed that sometimes
@@ -16,31 +17,48 @@ Other solvers are implemented too, mostly for teaching purposes:
     as it is ~2x slower than cholmod.
 """
 
+import sys
 import time
 import unittest
-from typing import Callable, Union, Iterable, Optional, Dict, Tuple, Any, Sequence
+from typing import Any, Callable, Dict, Iterable, Optional, Sequence, Tuple, Union
 from warnings import warn
 
 import numpy as np
 from numpy.linalg import norm
 
+sys.path.insert(0, "/F/miniforge3/lib/python3.10/site-packages")
 from scipy._lib.six import string_types
-from scipy.sparse import issparse, csr_matrix, spmatrix, dia_matrix
-from scipy.sparse.linalg import LinearOperator
-
 from scipy.optimize import OptimizeResult
-from scipy.optimize._lsq.common import in_bounds, make_strictly_feasible, check_termination, \
-    scale_for_robust_loss_function, compute_grad, compute_jac_scale, print_header_nonlinear, print_iteration_nonlinear
-from scipy.optimize._lsq.least_squares import IMPLEMENTED_LOSSES, TERMINATION_MESSAGES, prepare_bounds, \
-    check_x_scale, check_tolerance, construct_loss_function, check_jac_sparsity, approx_derivative, call_minpack
+from scipy.optimize._lsq.common import (
+    check_termination,
+    compute_grad,
+    compute_jac_scale,
+    in_bounds,
+    make_strictly_feasible,
+    print_header_nonlinear,
+    print_iteration_nonlinear,
+    scale_for_robust_loss_function,
+)
+from scipy.optimize._lsq.dogbox import dogbox
+from scipy.optimize._lsq.least_squares import (
+    IMPLEMENTED_LOSSES,
+    TERMINATION_MESSAGES,
+    approx_derivative,
+    call_minpack,
+    check_jac_sparsity,
+    check_tolerance,
+    check_x_scale,
+    construct_loss_function,
+    prepare_bounds,
+)
 
 # Optimizers
 from scipy.optimize._lsq.trf import trf
-from scipy.optimize._lsq.dogbox import dogbox
-from sksparse.cholmod import cholesky_AAt, cholesky, Factor
+from scipy.sparse import csr_matrix, dia_matrix, issparse, spmatrix
+from scipy.sparse.linalg import LinearOperator
+from sksparse.cholmod import Factor, cholesky, cholesky_AAt
 
 from aro_localization.utils import merge_dicts
-
 
 JacTypes = Union[np.ndarray, spmatrix, LinearOperator]
 """All types supported as Jacobian."""
@@ -59,40 +77,46 @@ class NonlinearLeastSquaresSolver:
         self.options: Dict[str, Any] = {}
         """Options of the solver."""
 
-    def validate_loss(self, loss: Union[str, Callable[[np.ndarray], np.ndarray], LinearOperator]) -> None:
-        """Validate the `loss_function` argument to :meth:`solve`.
+    def validate_loss(
+        self, loss: Union[str, Callable[[np.ndarray], np.ndarray], LinearOperator]
+    ) -> None:
+        """
+        Validate the `loss_function` argument to :meth:`solve`.
 
         :raises ValueError: If the given loss type is not supported by this solver.
         """
-        pass
 
-    def validate_bounds(self, lb: Union[float, np.ndarray], ub: Union[float, np.ndarray]) -> None:
-        """Validate the bounds arguments to :meth:`solve`.
+    def validate_bounds(
+        self, lb: Union[float, np.ndarray], ub: Union[float, np.ndarray]
+    ) -> None:
+        """
+        Validate the bounds arguments to :meth:`solve`.
 
         :raises ValueError: If this solver does not support bounded optimization.
         """
-        pass
 
     def validate_dimensions(self, num_residuals: int, num_variables: int) -> None:
-        """Validate the dimensions of the problem are supported by this solver.
+        """
+        Validate the dimensions of the problem are supported by this solver.
 
         :param num_residuals: Number of residuals (rows) in the problem.
         :param num_variables: Number of variables (columns) in the problem.
         :raises ValueError: If this solver does not support problems with the given dimensions.
         """
-        pass
 
     def validate_jacobian(self, jacobian: Union[np.ndarray, spmatrix]) -> None:
-        """Validate the Jacobian matrix passed to :meth:`solve` (e.g. whether it is sparse or not).
+        """
+        Validate the Jacobian matrix passed to :meth:`solve` (e.g. whether it is sparse or not).
 
         :param jacobian: The Jacobian provided by user.
         :raises ValueError: If this solver does not support the given type of Jacobian.
         """
-        pass
 
     def adjust_initial_guess(
-            self, x0: np.ndarray, lb: Union[float, np.ndarray], ub: Union[float, np.ndarray]) -> np.ndarray:
-        """Adjust the initial guess of the optimization problem.
+        self, x0: np.ndarray, lb: Union[float, np.ndarray], ub: Union[float, np.ndarray]
+    ) -> np.ndarray:
+        """
+        Adjust the initial guess of the optimization problem.
 
         :param x0: The provided initial guess.
         :param lb: Lower bound(s) of the optimization problem.
@@ -102,21 +126,31 @@ class NonlinearLeastSquaresSolver:
         return x0
 
     def set_options(self, options: Dict[str, Any]) -> None:
-        """Set options of the solver.
+        """
+        Set options of the solver.
 
         :param options: The new options. They are merged with the current options.
         """
         self.options = merge_dicts(self.options, options)
 
-    def estimate_jacobian(self,
-                          fun: Callable[..., np.ndarray], jac: Optional[Union[str, Callable[..., JacTypes]]],
-                          x0: np.ndarray, f0: np.ndarray,
-                          num_variables: int, num_residuals: int,
-                          jac_sparsity: Optional[Union[np.ndarray, spmatrix]],
-                          bounds: Tuple[float, float],
-                          args: Sequence[Any], kwargs: Dict[str, Any]) -> \
-            Tuple[Optional[JacTypes], Optional[Callable[[np.ndarray, Optional[np.ndarray]], JacTypes]]]:
-        """Estimate Jacobian using a finite difference method.
+    def estimate_jacobian(
+        self,
+        fun: Callable[..., np.ndarray],
+        jac: Optional[Union[str, Callable[..., JacTypes]]],
+        x0: np.ndarray,
+        f0: np.ndarray,
+        num_variables: int,
+        num_residuals: int,
+        jac_sparsity: Optional[Union[np.ndarray, spmatrix]],
+        bounds: Tuple[float, float],
+        args: Sequence[Any],
+        kwargs: Dict[str, Any],
+    ) -> Tuple[
+        Optional[JacTypes],
+        Optional[Callable[[np.ndarray, Optional[np.ndarray]], JacTypes]],
+    ]:
+        """
+        Estimate Jacobian using a finite difference method.
 
         :param fun: The residuals function.
         :param jac: The method for estimating the Jacobian (either '2-point', '3-point' or 'cs').
@@ -133,16 +167,27 @@ class NonlinearLeastSquaresSolver:
         """
         raise NotImplementedError
 
-    def solve(self,
-              fun: Callable[[np.ndarray], np.ndarray], jac: Callable[[np.ndarray, Optional[np.ndarray]], JacTypes],
-              x0: np.ndarray, f0: np.ndarray, J0: JacTypes,
-              lb: Union[float, np.ndarray], ub: Union[float, np.ndarray],
-              ftol: Optional[float], xtol: Optional[float], gtol: Optional[float], max_nfev: Optional[int],
-              x_scale: Union[str, float],
-              loss_function: Union[str, Callable[[np.ndarray], np.ndarray]],
-              verbose: Optional[int],
-              initial_fev_time_ms: float, initial_jev_time_ms: float) -> OptimizeResult:
-        """Solve the nonlinear least-squares problem.
+    def solve(
+        self,
+        fun: Callable[[np.ndarray], np.ndarray],
+        jac: Callable[[np.ndarray, Optional[np.ndarray]], JacTypes],
+        x0: np.ndarray,
+        f0: np.ndarray,
+        J0: JacTypes,
+        lb: Union[float, np.ndarray],
+        ub: Union[float, np.ndarray],
+        ftol: Optional[float],
+        xtol: Optional[float],
+        gtol: Optional[float],
+        max_nfev: Optional[int],
+        x_scale: Union[str, float],
+        loss_function: Union[str, Callable[[np.ndarray], np.ndarray]],
+        verbose: Optional[int],
+        initial_fev_time_ms: float,
+        initial_jev_time_ms: float,
+    ) -> OptimizeResult:
+        """
+        Solve the nonlinear least-squares problem.
 
         :param fun: The function returning residuals (its input are current variable estimates). The returned residuals
                     are Numpy array N (one number for each residual).
@@ -173,11 +218,13 @@ class NonlinearLeastSquaresSolver:
 
 
 class LMSolver(NonlinearLeastSquaresSolver):
-    """Original 'lm' solver from scipy.
+    """
+    Original 'lm' solver from scipy.
 
     Accepted options:
 
-      - diff_step (float, default is automatic): Size of the automatic differentiation step."""
+      - diff_step (float, default is automatic): Size of the automatic differentiation step.
+    """
 
     def __init__(self):
         super().__init__("lm")
@@ -185,55 +232,83 @@ class LMSolver(NonlinearLeastSquaresSolver):
 
     def set_options(self, options: Dict[str, Any]) -> None:
         super().set_options(options)
-        self.diff_step: Union[None, np.ndarray, Iterable[float], int, float] = options.get('diff_step', None)
+        self.diff_step: Union[None, np.ndarray, Iterable[float], int, float] = (
+            options.get("diff_step")
+        )
 
-    def validate_loss(self, loss: Union[str, Callable[[np.ndarray], np.ndarray], LinearOperator]) -> None:
-        if loss != 'linear':
+    def validate_loss(
+        self, loss: Union[str, Callable[[np.ndarray], np.ndarray], LinearOperator]
+    ) -> None:
+        if loss != "linear":
             raise ValueError("method='lm' supports only 'linear' loss function.")
 
-    def validate_bounds(self, lb: Union[float, np.ndarray], ub: Union[float, np.ndarray]) -> None:
+    def validate_bounds(
+        self, lb: Union[float, np.ndarray], ub: Union[float, np.ndarray]
+    ) -> None:
         if not np.all((lb == -np.inf) & (ub == np.inf)):
             raise ValueError("Method 'lm' doesn't support bounds.")
 
     def validate_dimensions(self, num_residuals: int, num_variables: int) -> None:
         if num_residuals < num_variables:
             raise ValueError(
-                "Method 'lm' doesn't work when the number of residuals is less than the number of variables.")
+                "Method 'lm' doesn't work when the number of residuals is less than the number of variables."
+            )
 
     def validate_jacobian(self, jacobian: JacTypes) -> None:
         if not isinstance(jacobian, np.ndarray):
             raise ValueError("method='lm' works only with dense Jacobian matrices.")
 
-    def estimate_jacobian(self,
-                          fun: Callable[..., np.ndarray], jac: Optional[Union[str, Callable[..., JacTypes]]],
-                          x0: np.ndarray, f0: np.ndarray,
-                          num_variables: int, num_residuals: int,
-                          jac_sparsity: Optional[Union[np.ndarray, spmatrix]],
-                          bounds: Tuple[float, float],
-                          args: Sequence[Any], kwargs: Dict[str, Any]) -> \
-            Tuple[Optional[JacTypes], Optional[Callable[[np.ndarray, Optional[np.ndarray]], JacTypes]]]:
+    def estimate_jacobian(
+        self,
+        fun: Callable[..., np.ndarray],
+        jac: Optional[Union[str, Callable[..., JacTypes]]],
+        x0: np.ndarray,
+        f0: np.ndarray,
+        num_variables: int,
+        num_residuals: int,
+        jac_sparsity: Optional[Union[np.ndarray, spmatrix]],
+        bounds: Tuple[float, float],
+        args: Sequence[Any],
+        kwargs: Dict[str, Any],
+    ) -> Tuple[
+        Optional[JacTypes],
+        Optional[Callable[[np.ndarray, Optional[np.ndarray]], JacTypes]],
+    ]:
         if jac_sparsity is not None:
             raise ValueError("method='lm' does not support `jac_sparsity`.")
 
-        if jac != '2-point':
-            warn("jac='{0}' works equivalently to '2-point' for method='lm'.".format(jac))
+        if jac != "2-point":
+            warn(f"jac='{jac}' works equivalently to '2-point' for method='lm'.")
 
         return None, None
 
-    def solve(self,
-              fun: Callable[[np.ndarray], np.ndarray], jac: Callable[[np.ndarray, Optional[np.ndarray]], JacTypes],
-              x0: np.ndarray, f0: np.ndarray, J0: JacTypes,
-              lb: Union[float, np.ndarray], ub: Union[float, np.ndarray],
-              ftol: float, xtol: float, gtol: float, max_nfev: int,
-              x_scale: Union[str, float],
-              loss_function: Union[str, Callable[[np.ndarray], np.ndarray]],
-              verbose: Optional[int],
-              initial_fev_time_ms: float, initial_jev_time_ms: float) -> OptimizeResult:
-        return call_minpack(fun, x0, jac, ftol, xtol, gtol, max_nfev, x_scale, self.diff_step)
+    def solve(
+        self,
+        fun: Callable[[np.ndarray], np.ndarray],
+        jac: Callable[[np.ndarray, Optional[np.ndarray]], JacTypes],
+        x0: np.ndarray,
+        f0: np.ndarray,
+        J0: JacTypes,
+        lb: Union[float, np.ndarray],
+        ub: Union[float, np.ndarray],
+        ftol: float,
+        xtol: float,
+        gtol: float,
+        max_nfev: int,
+        x_scale: Union[str, float],
+        loss_function: Union[str, Callable[[np.ndarray], np.ndarray]],
+        verbose: Optional[int],
+        initial_fev_time_ms: float,
+        initial_jev_time_ms: float,
+    ) -> OptimizeResult:
+        return call_minpack(
+            fun, x0, jac, ftol, xtol, gtol, max_nfev, x_scale, self.diff_step
+        )
 
 
 class TRFSolverBase(NonlinearLeastSquaresSolver):
-    """Base class for Trust-Region-based solvers.
+    """
+    Base class for Trust-Region-based solvers.
 
     Accepted options:
 
@@ -249,40 +324,59 @@ class TRFSolverBase(NonlinearLeastSquaresSolver):
         self.tr_options: Dict[str, Any] = {}
 
     def validate_jacobian(self, jacobian: JacTypes) -> None:
-        if not isinstance(jacobian, np.ndarray) and self.solver == 'exact':
-            raise ValueError("tr_solver='exact' works only with dense Jacobian matrices.")
+        if not isinstance(jacobian, np.ndarray) and self.solver == "exact":
+            raise ValueError(
+                "tr_solver='exact' works only with dense Jacobian matrices."
+            )
 
         if self.solver is None:
             if isinstance(jacobian, np.ndarray):
-                self.solver = 'exact'
+                self.solver = "exact"
             else:
-                self.solver = 'lsmr'
+                self.solver = "lsmr"
 
     def set_options(self, options: Dict[str, Any]) -> None:
         super().set_options(options)
-        self.diff_step = options.pop('diff_step', None)
-        solver = options.pop('tr_solver', None)
-        if solver not in [None, 'exact', 'lsmr']:
+        self.diff_step = options.pop("diff_step", None)
+        solver = options.pop("tr_solver", None)
+        if solver not in [None, "exact", "lsmr"]:
             raise ValueError("`tr_solver` must be None, 'exact' or 'lsmr'.")
         self.solver = solver
         self.tr_options = options
 
-    def estimate_jacobian(self,
-                          fun: Callable[..., np.ndarray], jac: Optional[Union[str, Callable[..., JacTypes]]],
-                          x0: np.ndarray, f0: np.ndarray,
-                          num_variables: int, num_residuals: int,
-                          jac_sparsity: Optional[Union[np.ndarray, spmatrix]],
-                          bounds: Tuple[float, float],
-                          args: Sequence[Any], kwargs: Dict[str, Any]) -> \
-            Tuple[Optional[JacTypes], Optional[Callable[[np.ndarray, Optional[np.ndarray]], JacTypes]]]:
-        if jac_sparsity is not None and self.solver == 'exact':
+    def estimate_jacobian(
+        self,
+        fun: Callable[..., np.ndarray],
+        jac: Optional[Union[str, Callable[..., JacTypes]]],
+        x0: np.ndarray,
+        f0: np.ndarray,
+        num_variables: int,
+        num_residuals: int,
+        jac_sparsity: Optional[Union[np.ndarray, spmatrix]],
+        bounds: Tuple[float, float],
+        args: Sequence[Any],
+        kwargs: Dict[str, Any],
+    ) -> Tuple[
+        Optional[JacTypes],
+        Optional[Callable[[np.ndarray, Optional[np.ndarray]], JacTypes]],
+    ]:
+        if jac_sparsity is not None and self.solver == "exact":
             raise ValueError("tr_solver='exact' is incompatible with `jac_sparsity`.")
 
         jac_sparsity = check_jac_sparsity(jac_sparsity, num_variables, num_residuals)
 
         def jac_wrapped(x, f):
-            J = approx_derivative(fun, x, rel_step=self.diff_step, method=jac, f0=f,
-                                  bounds=bounds, args=args, kwargs=kwargs, sparsity=jac_sparsity)
+            J = approx_derivative(
+                fun,
+                x,
+                rel_step=self.diff_step,
+                method=jac,
+                f0=f,
+                bounds=bounds,
+                args=args,
+                kwargs=kwargs,
+                sparsity=jac_sparsity,
+            )
             if J.ndim != 2:  # J is guaranteed not sparse.
                 J = np.atleast_2d(J)
 
@@ -298,20 +392,47 @@ class TRFSolver(TRFSolverBase):
         super().__init__("trf")
 
     def adjust_initial_guess(
-            self, x0: np.ndarray, lb: Union[float, np.ndarray], ub: Union[float, np.ndarray]) -> np.ndarray:
+        self, x0: np.ndarray, lb: Union[float, np.ndarray], ub: Union[float, np.ndarray]
+    ) -> np.ndarray:
         return make_strictly_feasible(x0, lb, ub)
 
-    def solve(self,
-              fun: Callable[[np.ndarray], np.ndarray], jac: Callable[[np.ndarray, Optional[np.ndarray]], JacTypes],
-              x0: np.ndarray, f0: np.ndarray, J0: JacTypes,
-              lb: Union[float, np.ndarray], ub: Union[float, np.ndarray],
-              ftol: float, xtol: float, gtol: float, max_nfev: int,
-              x_scale: Union[str, float],
-              loss_function: Union[str, Callable[[np.ndarray], np.ndarray]],
-              verbose: Optional[int],
-              initial_fev_time_ms: float, initial_jev_time_ms: float) -> OptimizeResult:
-        return trf(fun, jac, x0, f0, J0, lb, ub, ftol, xtol, gtol, max_nfev, x_scale, loss_function,
-                   self.solver, self.tr_options.copy(), verbose)
+    def solve(
+        self,
+        fun: Callable[[np.ndarray], np.ndarray],
+        jac: Callable[[np.ndarray, Optional[np.ndarray]], JacTypes],
+        x0: np.ndarray,
+        f0: np.ndarray,
+        J0: JacTypes,
+        lb: Union[float, np.ndarray],
+        ub: Union[float, np.ndarray],
+        ftol: float,
+        xtol: float,
+        gtol: float,
+        max_nfev: int,
+        x_scale: Union[str, float],
+        loss_function: Union[str, Callable[[np.ndarray], np.ndarray]],
+        verbose: Optional[int],
+        initial_fev_time_ms: float,
+        initial_jev_time_ms: float,
+    ) -> OptimizeResult:
+        return trf(
+            fun,
+            jac,
+            x0,
+            f0,
+            J0,
+            lb,
+            ub,
+            ftol,
+            xtol,
+            gtol,
+            max_nfev,
+            x_scale,
+            loss_function,
+            self.solver,
+            self.tr_options.copy(),
+            verbose,
+        )
 
 
 class DogboxSolver(TRFSolverBase):
@@ -320,23 +441,51 @@ class DogboxSolver(TRFSolverBase):
     def __init__(self):
         super().__init__("dogbox")
 
-    def solve(self,
-              fun: Callable[[np.ndarray], np.ndarray], jac: Callable[[np.ndarray, Optional[np.ndarray]], JacTypes],
-              x0: np.ndarray, f0: np.ndarray, J0: JacTypes,
-              lb: Union[float, np.ndarray], ub: Union[float, np.ndarray],
-              ftol: float, xtol: float, gtol: float, max_nfev: int,
-              x_scale: Union[str, float],
-              loss_function: Union[str, Callable[[np.ndarray], np.ndarray]],
-              verbose: Optional[int],
-              initial_fev_time_ms: float, initial_jev_time_ms: float) -> OptimizeResult:
-        if self.solver == 'lsmr' and 'regularize' in self.options:
-            warn("The keyword 'regularize' in `tr_options` is not relevant for 'dogbox' method.")
+    def solve(
+        self,
+        fun: Callable[[np.ndarray], np.ndarray],
+        jac: Callable[[np.ndarray, Optional[np.ndarray]], JacTypes],
+        x0: np.ndarray,
+        f0: np.ndarray,
+        J0: JacTypes,
+        lb: Union[float, np.ndarray],
+        ub: Union[float, np.ndarray],
+        ftol: float,
+        xtol: float,
+        gtol: float,
+        max_nfev: int,
+        x_scale: Union[str, float],
+        loss_function: Union[str, Callable[[np.ndarray], np.ndarray]],
+        verbose: Optional[int],
+        initial_fev_time_ms: float,
+        initial_jev_time_ms: float,
+    ) -> OptimizeResult:
+        if self.solver == "lsmr" and "regularize" in self.options:
+            warn(
+                "The keyword 'regularize' in `tr_options` is not relevant for 'dogbox' method."
+            )
             tr_options = self.options.copy()
-            del tr_options['regularize']
+            del tr_options["regularize"]
             self.options = tr_options
 
-        return dogbox(fun, jac, x0, f0, J0, lb, ub, ftol, xtol, gtol, max_nfev, x_scale, loss_function,
-                      self.solver, self.tr_options, verbose)
+        return dogbox(
+            fun,
+            jac,
+            x0,
+            f0,
+            J0,
+            lb,
+            ub,
+            ftol,
+            xtol,
+            gtol,
+            max_nfev,
+            x_scale,
+            loss_function,
+            self.solver,
+            self.tr_options,
+            verbose,
+        )
 
 
 class CustomSolverBase(NonlinearLeastSquaresSolver):
@@ -348,12 +497,15 @@ class CustomSolverBase(NonlinearLeastSquaresSolver):
         """
         super().__init__(name)
 
-    def validate_bounds(self, lb: Union[float, np.ndarray], ub: Union[float, np.ndarray]) -> None:
+    def validate_bounds(
+        self, lb: Union[float, np.ndarray], ub: Union[float, np.ndarray]
+    ) -> None:
         if not np.all((lb == -np.inf) & (ub == np.inf)):
             raise ValueError("Custom solvers don't support bounds.")
 
     def solve_dx(self, J: JacTypes, fx: np.ndarray) -> np.ndarray:
-        """Solve `x` from :math:`J^T J x = J^T \\mathrm{fx}`. Child classes should override this method.
+        """
+        Solve `x` from :math:`J^T J x = J^T \\mathrm{fx}`. Child classes should override this method.
 
         :param J: Jacobian.
         :param fx: Residuals.
@@ -364,16 +516,25 @@ class CustomSolverBase(NonlinearLeastSquaresSolver):
     # This function is heavily based on the implementation of scipy.optimize._lsq.trf .
     # It behaves the same for the original methods, but contains a few performance optimizations for working with
     # sparse matrices and also offers more verbose debug printing regarding performance.
-    def solve(self,
-              fun: Callable[[np.ndarray], np.ndarray], jac: Callable[[np.ndarray, Optional[np.ndarray]], JacTypes],
-              x0: np.ndarray, f0: np.ndarray, J0: JacTypes,
-              lb: Union[float, np.ndarray], ub: Union[float, np.ndarray],
-              ftol: float, xtol: float, gtol: float, max_nfev: int,
-              x_scale: Union[str, float],
-              loss_function: Union[str, Callable[[np.ndarray], np.ndarray]],
-              verbose: Optional[int],
-              initial_fev_time_ms: float, initial_jev_time_ms: float) -> OptimizeResult:
-
+    def solve(
+        self,
+        fun: Callable[[np.ndarray], np.ndarray],
+        jac: Callable[[np.ndarray, Optional[np.ndarray]], JacTypes],
+        x0: np.ndarray,
+        f0: np.ndarray,
+        J0: JacTypes,
+        lb: Union[float, np.ndarray],
+        ub: Union[float, np.ndarray],
+        ftol: float,
+        xtol: float,
+        gtol: float,
+        max_nfev: int,
+        x_scale: Union[str, float],
+        loss_function: Union[str, Callable[[np.ndarray], np.ndarray]],
+        verbose: Optional[int],
+        initial_fev_time_ms: float,
+        initial_jev_time_ms: float,
+    ) -> OptimizeResult:
         x = x0.copy()
 
         f = f0
@@ -392,7 +553,7 @@ class CustomSolverBase(NonlinearLeastSquaresSolver):
 
         g = compute_grad(J, f)
 
-        jac_scale = isinstance(x_scale, string_types) and x_scale == 'jac'
+        jac_scale = isinstance(x_scale, string_types) and x_scale == "jac"
         if jac_scale:
             scale, scale_inv = compute_jac_scale(J)
         else:
@@ -420,7 +581,9 @@ class CustomSolverBase(NonlinearLeastSquaresSolver):
                 termination_status = 1
 
             if verbose == 2:
-                print_iteration_nonlinear(iteration, nfev, cost, actual_reduction, step_norm, g_norm)
+                print_iteration_nonlinear(
+                    iteration, nfev, cost, actual_reduction, step_norm, g_norm
+                )
 
             if termination_status is not None or nfev == max_nfev:
                 times.append((time.perf_counter() - tic) * 1e3)
@@ -450,7 +613,8 @@ class CustomSolverBase(NonlinearLeastSquaresSolver):
 
             step_norm = norm(step)
             termination_status = check_termination(
-                actual_reduction, cost, step_norm, norm(x), 1.0, ftol, xtol)
+                actual_reduction, cost, step_norm, norm(x), 1.0, ftol, xtol
+            )
 
             if actual_reduction > 0:
                 x = x_new
@@ -481,22 +645,43 @@ class CustomSolverBase(NonlinearLeastSquaresSolver):
             times.append((time.perf_counter() - tic) * 1e3)
 
         if verbose == 2:
-            print("Iteration times in ms: " + ", ".join(["%0.2f" % (t,) for t in times]))
-            print("Least Sq. times in ms: " + ", ".join(["%0.2f" % (t,) for t in lsq_times]))
-            print("Res. Eval times in ms: " + ", ".join(["%0.2f" % (t,) for t in fev_times]))
-            print("Jac. Eval times in ms: " + ", ".join(["%0.2f" % (t,) for t in jev_times]))
+            print(
+                "Iteration times in ms: " + ", ".join(["%0.2f" % (t,) for t in times])
+            )
+            print(
+                "Least Sq. times in ms: "
+                + ", ".join(["%0.2f" % (t,) for t in lsq_times])
+            )
+            print(
+                "Res. Eval times in ms: "
+                + ", ".join(["%0.2f" % (t,) for t in fev_times])
+            )
+            print(
+                "Jac. Eval times in ms: "
+                + ", ".join(["%0.2f" % (t,) for t in jev_times])
+            )
 
         if termination_status is None:
             termination_status = 0
 
         active_mask = np.zeros_like(x)
         return OptimizeResult(
-            x=x, cost=cost, fun=f_true, jac=J, grad=g, optimality=g_norm, active_mask=active_mask, nfev=nfev, njev=njev,
-            status=termination_status)
+            x=x,
+            cost=cost,
+            fun=f_true,
+            jac=J,
+            grad=g,
+            optimality=g_norm,
+            active_mask=active_mask,
+            nfev=nfev,
+            njev=njev,
+            status=termination_status,
+        )
 
 
 class CholmodSolver(CustomSolverBase):
-    """Least squares solver using the cholmod library.
+    """
+    Least squares solver using the cholmod library.
 
     Accepted options:
 
@@ -507,7 +692,7 @@ class CholmodSolver(CustomSolverBase):
 
         - a, ldlt, l_dlt, l_lt
         - a should be the fastest
-      """
+    """
 
     def __init__(self):
         super().__init__("cholmod")
@@ -525,31 +710,52 @@ class CholmodSolver(CustomSolverBase):
         be the fastest."""
 
     def set_options(self, options: Dict[str, Any]) -> None:
-        allowed_ordering_methods = ("default", "natural", "best", "amd", "metis", "nesdis", "colamd")
-        if options.get("ordering_method", self.ordering_method) not in allowed_ordering_methods:
-            raise ValueError("Ordering method {} is not allowed. It must be one of {}.".format(
-                options["ordering_method"], ",".join(allowed_ordering_methods)))
+        allowed_ordering_methods = (
+            "default",
+            "natural",
+            "best",
+            "amd",
+            "metis",
+            "nesdis",
+            "colamd",
+        )
+        if (
+            options.get("ordering_method", self.ordering_method)
+            not in allowed_ordering_methods
+        ):
+            raise ValueError(
+                "Ordering method {} is not allowed. It must be one of {}.".format(
+                    options["ordering_method"], ",".join(allowed_ordering_methods)
+                )
+            )
         allowed_solve_methods = ("a", "ldlt", "l_dlt", "l_lt")
         if options.get("solve_method", self.solve_method) not in allowed_solve_methods:
-            raise ValueError("Solve method {} is not allowed. It must be one of {}.".format(
-                options["solve_method"], ",".join(allowed_solve_methods)))
+            raise ValueError(
+                "Solve method {} is not allowed. It must be one of {}.".format(
+                    options["solve_method"], ",".join(allowed_solve_methods)
+                )
+            )
 
         super().set_options(options)
-        self.beta = float(options.pop('beta', self.beta))
-        self.use_AAt_decomposition = bool(options.pop('use_AAt_decomposition', self.use_AAt_decomposition))
-        self.ordering_method = str(options.pop('ordering_method', self.ordering_method))
-        self.solve_method = str(options.pop('solve_method', self.solve_method))
+        self.beta = float(options.pop("beta", self.beta))
+        self.use_AAt_decomposition = bool(
+            options.pop("use_AAt_decomposition", self.use_AAt_decomposition)
+        )
+        self.ordering_method = str(options.pop("ordering_method", self.ordering_method))
+        self.solve_method = str(options.pop("solve_method", self.solve_method))
 
     def decompose_JTJ(self, JT: JacTypes) -> Factor:
-        """Compute the Cholesky decomposition of the JT @ JT.T product.
+        """
+        Compute the Cholesky decomposition of the JT @ JT.T product.
 
         :param JT: Transposed Jacobian.
         :return: The decomposition.
         """
         if self.use_AAt_decomposition:
-            return cholesky_AAt(JT, beta=self.beta, ordering_method=self.ordering_method)
-        else:
-            return cholesky(JT @ JT.T, beta=self.beta, ordering_method=self.ordering_method)
+            return cholesky_AAt(
+                JT, beta=self.beta, ordering_method=self.ordering_method
+            )
+        return cholesky(JT @ JT.T, beta=self.beta, ordering_method=self.ordering_method)
 
     def solve_dx(self, J: JacTypes, fx: np.ndarray) -> np.ndarray:
         JT = J.T
@@ -583,7 +789,7 @@ class CholmodSolver(CustomSolverBase):
                 y = factor.solve_L((JT @ fx)[p], use_LDLt_decomposition=False)
                 dx[p] = factor.solve_Lt(y, use_LDLt_decomposition=False)
         else:
-            raise ValueError("Solve method {} is not supported.".format(self.solve_method))
+            raise ValueError(f"Solve method {self.solve_method} is not supported.")
 
         return -dx
 
@@ -599,11 +805,11 @@ class PinvSolver(CustomSolverBase):
 
 
 SOLVERS = {
-    'lm': LMSolver(),
-    'trf': TRFSolver(),
-    'dogbox': DogboxSolver(),
-    'cholmod': CholmodSolver(),
-    'pinv': PinvSolver(),
+    "lm": LMSolver(),
+    "trf": TRFSolver(),
+    "dogbox": DogboxSolver(),
+    "cholmod": CholmodSolver(),
+    "pinv": PinvSolver(),
 }
 
 
@@ -617,8 +823,10 @@ except ImportError:
     has_umfpack = False
 
 if has_umfpack:
+
     class UmfpackSolver(CustomSolverBase):
-        """Least squares solver using umfpack library.
+        """
+        Least squares solver using umfpack library.
 
         Accepted options:
 
@@ -633,35 +841,45 @@ if has_umfpack:
 
         def set_options(self, options: Dict[str, Any]) -> None:
             super().set_options(options)
-            self.beta = float(options.pop('beta', self.beta))
+            self.beta = float(options.pop("beta", self.beta))
 
         def solve_dx(self, J: JacTypes, fx: np.ndarray) -> np.ndarray:
             JT = J.T
-            I = dia_matrix((np.ones((JT.shape[0],)), (0,)), shape=(JT.shape[0], JT.shape[0]))
+            I = dia_matrix(
+                (np.ones((JT.shape[0],)), (0,)), shape=(JT.shape[0], JT.shape[0])
+            )
             return -scikits.umfpack.spsolve(JT @ JT.T + self.beta * I, JT @ fx)
 
-    SOLVERS['umfpack'] = UmfpackSolver()
+    SOLVERS["umfpack"] = UmfpackSolver()
 
 
 # This function has been copied from scipy.optimize._lsq.least_squares and adapted to support additional solvers .
 def least_squares(
-        fun: Callable[..., np.ndarray],
-        x0: np.ndarray,
-        jac: Optional[Union[str, Callable[..., JacTypes]]] = '2-point',
-        bounds: Tuple[Union[float, np.ndarray], Union[float, np.ndarray]] = (-np.inf, np.inf),
-        method: Union[str, NonlinearLeastSquaresSolver] = 'trf',
-        ftol: Optional[float] = 1e-8, xtol: Optional[float] = 1e-8, gtol: Optional[float] = 1e-8,
-        x_scale: Union[str, float] = 1.0,
-        loss: Union[str, Callable[[np.ndarray], np.ndarray], LinearOperator] = 'linear',
-        f_scale: float = 1.0,
-        diff_step: Union[None, np.ndarray, Iterable[float], int, float] = None,
-        tr_solver: Optional[str] = None,
-        tr_options={},
-        jac_sparsity: Optional[Union[np.ndarray, spmatrix]] = None,
-        max_nfev: Optional[int] = None,
-        verbose: Optional[int] = 0,
-        args=(), kwargs={}):
-    """Solve a nonlinear least-squares problem with bounds on the variables.
+    fun: Callable[..., np.ndarray],
+    x0: np.ndarray,
+    jac: Optional[Union[str, Callable[..., JacTypes]]] = "2-point",
+    bounds: Tuple[Union[float, np.ndarray], Union[float, np.ndarray]] = (
+        -np.inf,
+        np.inf,
+    ),
+    method: Union[str, NonlinearLeastSquaresSolver] = "trf",
+    ftol: Optional[float] = 1e-8,
+    xtol: Optional[float] = 1e-8,
+    gtol: Optional[float] = 1e-8,
+    x_scale: Union[str, float] = 1.0,
+    loss: Union[str, Callable[[np.ndarray], np.ndarray], LinearOperator] = "linear",
+    f_scale: float = 1.0,
+    diff_step: Union[None, np.ndarray, Iterable[float], float] = None,
+    tr_solver: Optional[str] = None,
+    tr_options={},
+    jac_sparsity: Optional[Union[np.ndarray, spmatrix]] = None,
+    max_nfev: Optional[int] = None,
+    verbose: Optional[int] = 0,
+    args=(),
+    kwargs={},
+):
+    """
+    Solve a nonlinear least-squares problem with bounds on the variables.
 
     Given the residuals `f(x)` (an m-dimensional real function of n real variables) and the loss function `rho(s)`
     (a scalar function), `least_squares` finds a local minimum of the cost function `F(x)`::
@@ -740,24 +958,29 @@ def least_squares(
              :meth:`scipy.optimize.least_squares.least_squares`.
     """
     if method not in SOLVERS and not isinstance(method, NonlinearLeastSquaresSolver):
-        raise ValueError("`method` must be {0} or an instance of NonlinearLeastSquaresSolver.".format(
-            ", ".join(SOLVERS.keys())))
+        raise ValueError(
+            "`method` must be {0} or an instance of NonlinearLeastSquaresSolver.".format(
+                ", ".join(SOLVERS.keys())
+            )
+        )
 
     if isinstance(method, string_types):
         method = SOLVERS[method]
 
-    if jac not in ['2-point', '3-point', 'cs'] and not callable(jac):
+    if jac not in ["2-point", "3-point", "cs"] and not callable(jac):
         raise ValueError("`jac` must be '2-point', '3-point', 'cs' or callable.")
 
     options = tr_options.copy()
     if tr_solver is not None:
-        options['tr_solver'] = tr_solver
+        options["tr_solver"] = tr_solver
     if diff_step is not None:
-        options['diff_step'] = diff_step
+        options["diff_step"] = diff_step
     method.set_options(options)
 
     if loss not in IMPLEMENTED_LOSSES and not callable(loss):
-        raise ValueError("`loss` must be one of {0} or a callable.".format(IMPLEMENTED_LOSSES.keys()))
+        raise ValueError(
+            f"`loss` must be one of {IMPLEMENTED_LOSSES.keys()} or a callable."
+        )
 
     method.validate_loss(loss)
 
@@ -785,7 +1008,9 @@ def least_squares(
         raise ValueError("Inconsistent shapes between bounds and `x0`.")
 
     if np.any(lb >= ub):
-        raise ValueError("Each lower bound must be strictly less than each upper bound.")
+        raise ValueError(
+            "Each lower bound must be strictly less than each upper bound."
+        )
 
     if not in_bounds(x0, lb, ub):
         raise ValueError("`x0` is infeasible.")
@@ -836,6 +1061,7 @@ def least_squares(
                 return csr_matrix(jac(x, *args, **kwargs))
 
         elif isinstance(J0, LinearOperator):
+
             def jac_wrapped(x, _=None):
                 return jac(x, *args, **kwargs)
 
@@ -846,23 +1072,43 @@ def least_squares(
                 return np.atleast_2d(jac(x, *args, **kwargs))
 
     else:  # Estimate Jacobian by finite differences.
-        J0, jac_wrapped = method.estimate_jacobian(fun, jac, x0, f0, m, n, jac_sparsity, bounds, args, kwargs)
+        J0, jac_wrapped = method.estimate_jacobian(
+            fun, jac, x0, f0, m, n, jac_sparsity, bounds, args, kwargs
+        )
     initial_jev_time_ms = (time.perf_counter() - tic) * 1e3
 
     if J0 is not None:
         if J0.shape != (m, n):
             raise ValueError(
-                "The return value of `jac` has wrong shape: expected {0}, actual {1}.".format((m, n), J0.shape))
+                f"The return value of `jac` has wrong shape: expected {(m, n)}, actual {J0.shape}."
+            )
 
         method.validate_jacobian(J0)
 
-        jac_scale = isinstance(x_scale, string_types) and x_scale == 'jac'
+        jac_scale = isinstance(x_scale, string_types) and x_scale == "jac"
         if isinstance(J0, LinearOperator) and jac_scale:
-            raise ValueError("x_scale='jac' can't be used when `jac` returns LinearOperator.")
+            raise ValueError(
+                "x_scale='jac' can't be used when `jac` returns LinearOperator."
+            )
 
     result = method.solve(
-        fun_wrapped, jac_wrapped, x0, f0, J0, lb, ub, ftol, xtol, gtol, max_nfev, x_scale, loss_function, verbose,
-        initial_fev_time_ms, initial_jev_time_ms)
+        fun_wrapped,
+        jac_wrapped,
+        x0,
+        f0,
+        J0,
+        lb,
+        ub,
+        ftol,
+        xtol,
+        gtol,
+        max_nfev,
+        x_scale,
+        loss_function,
+        verbose,
+        initial_fev_time_ms,
+        initial_jev_time_ms,
+    )
 
     result.message = TERMINATION_MESSAGES[result.status]
     result.success = result.status > 0
@@ -881,9 +1127,10 @@ def least_squares(
 
     if verbose >= 1:
         print(result.message)
-        print("Function evaluations {0}, initial cost {1:.4e}, final cost {2:.4e}, first-order optimality {3:.2e}, "
-              "Jacobian density {4:0.4f}."
-              .format(result.nfev, initial_cost, result.cost, result.optimality, jac_density))
+        print(
+            f"Function evaluations {result.nfev}, initial cost {initial_cost:.4e}, final cost {result.cost:.4e}, first-order optimality {result.optimality:.2e}, "
+            f"Jacobian density {jac_density:0.4f}.",
+        )
 
     return result
 
@@ -936,23 +1183,40 @@ class TestLeastSquares(unittest.TestCase):
             tic = time.perf_counter()
             for i in range(iters):
                 sol = least_squares(
-                    lsq.res, lsq.x0.ravel(), lsq.dense_jac if dense_jac else lsq.jac, method=method,
-                    x_scale='jac', jac_sparsity=jac_sparsity, verbose=0, *args, **kwargs)
-            text += "{0}:{1:.2f}, ".format(size, (time.perf_counter() - tic) / iters * 1000)
+                    lsq.res,
+                    lsq.x0.ravel(),
+                    lsq.dense_jac if dense_jac else lsq.jac,
+                    method=method,
+                    x_scale="jac",
+                    jac_sparsity=jac_sparsity,
+                    verbose=0,
+                    *args,
+                    **kwargs,
+                )
+            text += f"{size}:{(time.perf_counter() - tic) / iters * 1000:.2f}, "
             self.assertTrue(sol.success)
             self.assertTrue(np.allclose(lsq.p_k.ravel(), sol.x, rtol=1e-4, atol=1e-4))
-        print("{}: size:time/it [ms] ".format(sol.method) + text)
+        print(f"{sol.method}: size:time/it [ms] " + text)
 
     def test_lm(self):
         self.do_tst(
-            "lm", dense_jac=True, iters=min(4, self.default_iters), sizes=[s for s in self.default_sizes if s <= 500])
+            "lm",
+            dense_jac=True,
+            iters=min(4, self.default_iters),
+            sizes=[s for s in self.default_sizes if s <= 500],
+        )
 
     def test_trf(self):
         self.do_tst("trf", iters=self.default_iters, sizes=self.default_sizes)
 
     def test_trf_exact(self):
-        self.do_tst("trf", iters=min(10, self.default_iters), sizes=[s for s in self.default_sizes if s <= 200],
-                    dense_jac=True, tr_solver='exact')
+        self.do_tst(
+            "trf",
+            iters=min(10, self.default_iters),
+            sizes=[s for s in self.default_sizes if s <= 200],
+            dense_jac=True,
+            tr_solver="exact",
+        )
 
     def test_dogbox(self):
         self.do_tst("dogbox", iters=self.default_iters, sizes=self.default_sizes)
@@ -963,11 +1227,15 @@ class TestLeastSquares(unittest.TestCase):
         self.do_tst("umfpack", iters=self.default_iters, sizes=self.default_sizes)
 
     def test_pinv(self):
-        self.do_tst("pinv", iters=min(2, self.default_iters), sizes=[s for s in self.default_sizes if s <= 200])
+        self.do_tst(
+            "pinv",
+            iters=min(2, self.default_iters),
+            sizes=[s for s in self.default_sizes if s <= 200],
+        )
 
     def test_cholmod(self):
         self.do_tst("cholmod", iters=self.default_iters, sizes=self.default_sizes)
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     unittest.main()

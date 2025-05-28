@@ -1,0 +1,8 @@
+{
+    "python.autoComplete.extraPaths": [
+        "/home/martin/FELoviny/leto25/aro/workspace/devel/lib/python3/dist-packages",
+        "/opt/ros/aro/lib/python3/dist-packages",
+        "/opt/ros/robolab/lib/python3/dist-packages",
+        "/opt/ros/noetic/lib/python3/dist-packages"
+    ]
+}
