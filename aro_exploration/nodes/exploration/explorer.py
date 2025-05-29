@@ -11,20 +11,6 @@ import actionlib
 import numpy as np
 import rospy
 import tf2_ros
-from geometry_msgs.msg import (
-    Pose,
-    Pose2D,
-    PoseArray,
-    PoseStamped,
-    Quaternion,
-    Transform,
-    TransformStamped,
-)
-from ros_numpy import msgify, numpify
-from std_srvs.srv import SetBool, SetBoolRequest
-from tf.transformations import euler_from_quaternion, quaternion_from_euler
-from tf2_py import TransformException
-
 from aro_msgs.msg import (
     FollowPathAction,
     FollowPathFeedback,
@@ -39,6 +25,19 @@ from aro_msgs.srv import (
     PlanPathRequest,
     PlanPathResponse,
 )
+from geometry_msgs.msg import (
+    Pose,
+    Pose2D,
+    PoseArray,
+    PoseStamped,
+    Quaternion,
+    Transform,
+    TransformStamped,
+)
+from ros_numpy import msgify, numpify
+from std_srvs.srv import SetBool, SetBoolRequest
+from tf.transformations import euler_from_quaternion, quaternion_from_euler
+from tf2_py import TransformException
 
 np.set_printoptions(precision=3)
 
@@ -94,6 +93,8 @@ class Explorer:
         self.current_goal: Optional[Pose2D] = None
         self.current_path: Optional[List[Pose2D]] = None
         self.frontiers_left = False
+        self._spin_flags = False, False, False, False
+        self._gold_spin: Optional[Pose2D] = None  # hold si to posral, sklizi co zasel
 
         rospy.loginfo("Initializing services and publishers.")
 
@@ -222,6 +223,24 @@ class Explorer:
             # TODO implement the exploration logic
             frontier_msg = self.get_best_value_frontier()
             goal: Optional[Pose2D] = frontier_msg.goal_pose
+            if np.isnan(goal.x):
+                if self._gold_spin is not None:
+                    goal = self._gold_spin
+                elif self._spin_flags[-1]:
+                    self._gold_spin = self.get_robot_pose()
+                    goal = self.init_pose
+                    self._gold_spin = None
+                else:
+                    goal = self.get_robot_pose()
+                    for i, th in enumerate((0, 0.7 * np.pi, 3 / 2 * np.pi, 0)):
+                        if not self._spin_flags[i]:
+                            continue
+                        goal.theta = th
+                        self._spin_flags[i] == True
+                        break
+            else:
+                self._spin_flags = False, False, False, False
+
         else:
             goal = self.init_pose
         # if np.linalg.norm(array(self.get_robot_pose()) - array(goal)) <= 0.25:
